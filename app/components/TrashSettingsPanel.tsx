@@ -5,6 +5,8 @@ import { Icon } from "../assets/icons";
 import type { PropertyValue } from "../lib/database-types";
 import { useDocs } from "../lib/docs-store";
 import { blockToText, type Doc } from "../lib/docs-utils";
+import { useFinance } from "../lib/finance-store";
+import { FinanceTrashList } from "./finance/FinanceTrashList";
 
 interface TrashSettingsPanelProps {
   onFeedback: (message: string) => void;
@@ -79,6 +81,7 @@ export function TrashSettingsPanel({ onFeedback }: TrashSettingsPanelProps) {
     restoreDocs,
     permanentlyDeleteDocs,
   } = useDocs();
+  const { trashedAccounts } = useFinance();
 
   const [query, setQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -203,6 +206,10 @@ export function TrashSettingsPanel({ onFeedback }: TrashSettingsPanelProps) {
     );
   };
 
+  if (trashedDocs.length === 0 && trashedAccounts.length > 0) {
+    return <FinanceTrashList onFeedback={onFeedback} />;
+  }
+
   if (trashedDocs.length === 0) {
     return (
       <div className="rounded-lg border border-border bg-canvas/50 px-6 py-12 text-center">
@@ -211,8 +218,8 @@ export function TrashSettingsPanel({ onFeedback }: TrashSettingsPanelProps) {
           Trash is empty
         </p>
         <p className="mt-1 text-xs text-muted">
-          Pages moved to Trash appear here so you can restore or permanently
-          delete them.
+          Pages and finance accounts moved to Trash appear here so you can
+          restore or permanently delete them.
         </p>
       </div>
     );
@@ -387,6 +394,8 @@ export function TrashSettingsPanel({ onFeedback }: TrashSettingsPanelProps) {
           })}
         </ul>
       )}
+
+      <FinanceTrashList onFeedback={onFeedback} />
     </div>
   );
 }

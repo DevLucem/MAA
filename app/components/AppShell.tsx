@@ -3,8 +3,11 @@
 import { Suspense, useEffect, useId, useState } from "react";
 import { Icon } from "../assets/icons";
 import { DocsProvider } from "../lib/docs-store";
+import { FinanceProvider } from "../lib/finance-store";
 import { AppToolbar } from "./AppToolbar";
 import { DocsSidebar } from "./DocsSidebar";
+import { FinanceSidebar } from "./FinanceSidebar";
+import { TransactionDialogHost } from "./finance/TransactionDialog";
 import { SettingsDialog } from "./SettingsDialog";
 
 /** Three-region layout shell with a toggleable sidebar, contextual toolbar, and main canvas. */
@@ -27,6 +30,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <DocsProvider>
+    <FinanceProvider>
       <div className="flex h-dvh bg-canvas">
         {mobileOpen && (
           <div
@@ -50,6 +54,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="scroll-region min-h-0 flex-1">
             <Suspense fallback={null}>
               <DocsSidebar onNavigate={() => setMobileOpen(false)} />
+              <FinanceSidebar onNavigate={() => setMobileOpen(false)} />
             </Suspense>
           </div>
 
@@ -93,6 +98,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+      <TransactionDialogHost />
+    </FinanceProvider>
     </DocsProvider>
   );
 }

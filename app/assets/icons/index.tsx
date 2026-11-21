@@ -33,6 +33,7 @@ import timelineSvg from "./timeline.svg";
 import trashSvg from "./trash.svg";
 import unlinkSvg from "./unlink.svg";
 import uploadSvg from "./upload.svg";
+import walletSvg from "./wallet.svg";
 import xSvg from "./x.svg";
 
 function assetUrl(asset: string | { src: string }): string {
@@ -74,6 +75,7 @@ const ICONS = {
   trash: assetUrl(trashSvg),
   unlink: assetUrl(unlinkSvg),
   upload: assetUrl(uploadSvg),
+  wallet: assetUrl(walletSvg),
   x: assetUrl(xSvg),
 } as const;
 

@@ -221,6 +221,11 @@
     }
   }
 
+  .summary-scroller {
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain;
+  }
+
   .doc-drag-handle {
     touch-action: none;
     -webkit-user-select: none;

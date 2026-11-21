@@ -6,7 +6,10 @@ import { Fragment, useCallback, useMemo, useState } from "react";
 import { Icon } from "../assets/icons";
 import { useDocs } from "../lib/docs-store";
 import { getDocAncestors, getDocStats } from "../lib/docs-utils";
+import { useFinance } from "../lib/finance-store";
+import { accountDisplayName, getAccountAncestors } from "../lib/finance-utils";
 import { DocToolbarActions } from "./toolbar/DocToolbarActions";
+import { FinanceToolbarActions } from "./toolbar/FinanceToolbarActions";
 
 function SidebarToggleButton({
   open,
@@ -51,6 +54,7 @@ export function AppToolbar({
 }: AppToolbarProps) {
   const pathname = usePathname();
   const { docs, getDatabase } = useDocs();
+  const { accounts: financeAccounts } = useFinance();
 
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -116,6 +120,24 @@ export function AppToolbar({
   }, [flashCopied]);
 
   const isDocsRoute = pathname === "/docs" || pathname.startsWith("/docs/");
+  const isFinanceRoute =
+    pathname === "/finance" || pathname.startsWith("/finance/");
+
+  const financeAccountId = pathname.startsWith("/finance/")
+    ? decodeURIComponent(pathname.slice("/finance/".length).split("/")[0] ?? "")
+    : null;
+  const financeBreadcrumbs = useMemo(
+    () =>
+      financeAccountId
+        ? getAccountAncestors(financeAccounts, financeAccountId)
+        : [],
+    [financeAccountId, financeAccounts]
+  );
+  const activeFinanceAccount =
+    financeBreadcrumbs.length > 0 &&
+    financeBreadcrumbs[financeBreadcrumbs.length - 1].id === financeAccountId
+      ? financeBreadcrumbs[financeBreadcrumbs.length - 1]
+      : null;
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-2 bg-canvas px-3">
@@ -166,6 +188,65 @@ export function AppToolbar({
                   Docs
                 </Link>
               )}
+            </>
+          )}
+
+          {isFinanceRoute && (
+            <>
+              <span aria-hidden="true" className="text-muted">
+                /
+              </span>
+              {pathname === "/finance" ? (
+                <span
+                  aria-current="page"
+                  className="truncate rounded px-1.5 py-1 font-medium text-foreground"
+                >
+                  Finance
+                </span>
+              ) : (
+                <Link
+                  href="/finance"
+                  className="shrink-0 rounded px-1.5 py-1 text-muted transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  Finance
+                </Link>
+              )}
+              {financeBreadcrumbs.map((account, idx) => {
+                const isLast = idx === financeBreadcrumbs.length - 1;
+                const label = accountDisplayName(account);
+                return (
+                  <Fragment key={account.id}>
+                    <span aria-hidden="true" className="text-muted">
+                      /
+                    </span>
+                    {isLast ? (
+                      <span
+                        aria-current="page"
+                        className="inline-flex min-w-0 items-center gap-1.5 truncate rounded px-1.5 py-1 font-medium text-foreground"
+                      >
+                        {account.icon && (
+                          <span aria-hidden="true" className="shrink-0 leading-none">
+                            {account.icon}
+                          </span>
+                        )}
+                        <span className="truncate">{label}</span>
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/finance/${encodeURIComponent(account.id)}`}
+                        className="inline-flex max-w-36 items-center gap-1.5 truncate rounded px-1.5 py-1 text-muted transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                      >
+                        {account.icon && (
+                          <span aria-hidden="true" className="shrink-0 leading-none">
+                            {account.icon}
+                          </span>
+                        )}
+                        <span className="truncate">{label}</span>
+                      </Link>
+                    )}
+                  </Fragment>
+                );
+              })}
             </>
           )}
 
@@ -287,6 +368,14 @@ export function AppToolbar({
             <Icon name="link" className="size-4" />
           </button>
         </div>
+      )}
+
+      {!activeDoc && !activeRouteDb && activeFinanceAccount && (
+        <FinanceToolbarActions
+          account={activeFinanceAccount}
+          copiedLabel={copiedLabel}
+          onCopyLink={handleCopyLink}
+        />
       )}
 
       <span role="status" aria-live="polite" className="sr-only">

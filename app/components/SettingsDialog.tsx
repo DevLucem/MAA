@@ -11,6 +11,7 @@ import {
   parseWorkspaceImport,
   serializeWorkspaceExport,
 } from "../lib/docs-transfer";
+import { useFinance } from "../lib/finance-store";
 import { TrashSettingsPanel } from "./TrashSettingsPanel";
 
 const SETTINGS_SECTIONS = [
@@ -32,6 +33,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const fileInputId = useId();
   const router = useRouter();
   const { docs, databases, trashedDocs, importWorkspace } = useDocs();
+  const { trashedAccounts } = useFinance();
+  const trashCount = trashedDocs.length + trashedAccounts.length;
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -246,9 +249,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                       <Icon name={section.icon} className="size-4 shrink-0" />
                       <span className="truncate">{section.label}</span>
                     </span>
-                    {section.id === "trash" && trashedDocs.length > 0 && (
+                    {section.id === "trash" && trashCount > 0 && (
                       <span className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-canvas px-1.5 py-0.5 text-[10px] font-semibold text-muted">
-                        {trashedDocs.length}
+                        {trashCount}
                       </span>
                     )}
                   </button>
