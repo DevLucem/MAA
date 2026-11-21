@@ -1,26 +1,236 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light dark;
+
+  /* Raw light/dark palette tokens */
+  --canvas-light: #ffffff;
+  --canvas-dark: #0f0f11;
+  --surface-light: #f7f7f8;
+  --surface-dark: #18181b;
+  --border-light: #e4e4e7;
+  --border-dark: #27272a;
+  --foreground-light: #09090b;
+  --foreground-dark: #fafafa;
+  --muted-light: #52525b;
+  --muted-dark: #a1a1aa;
+
+  --primary-light: #2563eb;
+  --primary-dark: #60a5fa;
+  --primary-foreground-light: #ffffff;
+  --primary-foreground-dark: #09090b;
+
+  --secondary-light: #f4f4f5;
+  --secondary-dark: #27272a;
+  --secondary-foreground-light: #18181b;
+  --secondary-foreground-dark: #fafafa;
+
+  --danger-light: #dc2626;
+  --danger-dark: #f87171;
+  --danger-foreground-light: #ffffff;
+  --danger-foreground-dark: #09090b;
+
+  --success-light: #15803d;
+  --success-dark: #4ade80;
+  --success-foreground-light: #ffffff;
+  --success-foreground-dark: #09090b;
+
+  /* Semantic tokens (light default) */
+  --canvas: var(--canvas-light);
+  --surface: var(--surface-light);
+  --border: var(--border-light);
+  --foreground: var(--foreground-light);
+  --muted: var(--muted-light);
+  --primary: var(--primary-light);
+  --primary-foreground: var(--primary-foreground-light);
+  --secondary: var(--secondary-light);
+  --secondary-foreground: var(--secondary-foreground-light);
+  --danger: var(--danger-light);
+  --danger-foreground: var(--danger-foreground-light);
+  --success: var(--success-light);
+  --success-foreground: var(--success-foreground-light);
+
+  accent-color: var(--primary);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* Fallback for browsers without light-dark() support */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --canvas: var(--canvas-dark);
+    --surface: var(--surface-dark);
+    --border: var(--border-dark);
+    --foreground: var(--foreground-dark);
+    --muted: var(--muted-dark);
+    --primary: var(--primary-dark);
+    --primary-foreground: var(--primary-foreground-dark);
+    --secondary: var(--secondary-dark);
+    --secondary-foreground: var(--secondary-foreground-dark);
+    --danger: var(--danger-dark);
+    --danger-foreground: var(--danger-foreground-dark);
+    --success: var(--success-dark);
+    --success-foreground: var(--success-foreground-dark);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Progressive enhancement using light-dark() so subtree color-scheme overrides work automatically */
+@supports (color: light-dark(white, black)) {
+  :root {
+    --canvas: light-dark(var(--canvas-light), var(--canvas-dark));
+    --surface: light-dark(var(--surface-light), var(--surface-dark));
+    --border: light-dark(var(--border-light), var(--border-dark));
+    --foreground: light-dark(var(--foreground-light), var(--foreground-dark));
+    --muted: light-dark(var(--muted-light), var(--muted-dark));
+    --primary: light-dark(var(--primary-light), var(--primary-dark));
+    --primary-foreground: light-dark(var(--primary-foreground-light), var(--primary-foreground-dark));
+    --secondary: light-dark(var(--secondary-light), var(--secondary-dark));
+    --secondary-foreground: light-dark(var(--secondary-foreground-light), var(--secondary-foreground-dark));
+    --danger: light-dark(var(--danger-light), var(--danger-dark));
+    --danger-foreground: light-dark(var(--danger-foreground-light), var(--danger-foreground-dark));
+    --success: light-dark(var(--success-light), var(--success-dark));
+    --success-foreground: light-dark(var(--success-foreground-light), var(--success-foreground-dark));
+  }
+}
+
+/* Forced Colors Mode (Windows High Contrast) system keyword fallbacks */
+@media (forced-colors: active) {
+  :root {
+    --canvas: Canvas;
+    --surface: Canvas;
+    --border: ButtonBorder;
+    --foreground: CanvasText;
+    --muted: GrayText;
+    --primary: Highlight;
+    --primary-foreground: HighlightText;
+    --secondary: ButtonFace;
+    --secondary-foreground: ButtonText;
+    --danger: Highlight;
+    --danger-foreground: HighlightText;
+    --success: Highlight;
+    --success-foreground: HighlightText;
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+}
+
+@utility scroll-region {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+@utility primary {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+@utility secondary {
+  background-color: var(--secondary);
+  color: var(--secondary-foreground);
+}
+
+@utility danger {
+  background-color: var(--danger);
+  color: var(--danger-foreground);
+}
+
+@utility success {
+  background-color: var(--success);
+  color: var(--success-foreground);
+}
+
+@layer components {
+  .icon {
+    display: inline-block;
+    flex: none;
+    background-color: currentColor;
+    mask: var(--icon) no-repeat center / contain;
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+
+  .editor-block:empty::before {
+    content: attr(data-placeholder);
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  .editor-block code {
+    border-radius: 0.25rem;
+    background-color: var(--secondary);
+    padding: 0.125rem 0.375rem;
+    font-family: var(--font-mono), monospace;
+    font-size: 0.875em;
+  }
+
+  .toolbar-popover {
+    margin: 0;
+    inset: auto;
+  }
+
+  @supports (position-area: block-end) {
+    .toolbar-popover {
+      position-area: block-end span-inline-start;
+      position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+      margin-block-start: 0.375rem;
+    }
+  }
+
+  @supports not (position-area: block-end) {
+    .toolbar-popover {
+      position: fixed;
+      inset: auto;
+      margin: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .toolbar-popover {
+      opacity: 0;
+      translate: 0 -0.25rem;
+      transition: opacity, translate, display, overlay;
+      transition-duration: 0.15s;
+      transition-behavior: allow-discrete;
+    }
+
+    .toolbar-popover:popover-open {
+      opacity: 1;
+      translate: 0 0;
+      transition-duration: 0.1s;
+
+      @starting-style {
+        opacity: 0;
+        translate: 0 -0.25rem;
+      }
+    }
+  }
+
+  .doc-drag-handle {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .is-dragging-doc,
+  .is-dragging-doc * {
+    cursor: grabbing !important;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }

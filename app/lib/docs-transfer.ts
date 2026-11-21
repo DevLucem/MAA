@@ -1,0 +1,504 @@
+import type { DatabasePropertySchema, InlineDatabase } from "./database-types";
+import { normalizeDatabase, normalizeDoc } from "./docs-storage";
+import {
+  createId,
+  type Doc,
+  type DocBlock,
+  isDocDescendant,
+} from "./docs-utils";
+
+export const WORKSPACE_EXPORT_FORMAT = "maa-workspace" as const;
+export const WORKSPACE_EXPORT_SCHEMA_VERSION = 1 as const;
+
+export type ImportMode = "merge" | "replace";
+
+export interface WorkspaceExportBundle {
+  format: typeof WORKSPACE_EXPORT_FORMAT;
+  schemaVersion: typeof WORKSPACE_EXPORT_SCHEMA_VERSION;
+  exportedAt: string;
+  docs: Doc[];
+  databases: InlineDatabase[];
+}
+
+export interface ParsedImportResult {
+  bundle: WorkspaceExportBundle;
+  docCount: number;
+  databaseCount: number;
+  skippedDocCount: number;
+  skippedDatabaseCount: number;
+  warnings: string[];
+}
+
+const VALID_VIEW_TYPES = new Set([
+  "table",
+  "board",
+  "timeline",
+  "gallery",
+  "calendar",
+]);
+
+const VALID_PROPERTY_TYPES = new Set([
+  "title",
+  "text",
+  "number",
+  "select",
+  "multi_select",
+  "date",
+  "checkbox",
+  "url",
+  "relation",
+  "person",
+  "file",
+  "created_time",
+  "formula",
+]);
+
+/** Builds a versioned workspace JSON bundle from current documents and inline databases. */
+export function buildWorkspaceExportBundle(
+  docs: Doc[],
+  databases: InlineDatabase[]
+): WorkspaceExportBundle {
+  return {
+    format: WORKSPACE_EXPORT_FORMAT,
+    schemaVersion: WORKSPACE_EXPORT_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    docs,
+    databases,
+  };
+}
+
+/** Serializes the full workspace as formatted JSON ready for download. */
+export function serializeWorkspaceExport(
+  docs: Doc[],
+  databases: InlineDatabase[]
+): string {
+  return JSON.stringify(buildWorkspaceExportBundle(docs, databases), null, 2);
+}
+
+/** Builds a date-stamped filename for workspace JSON exports. */
+export function buildExportFilename(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `maa-workspace-${year}-${month}-${day}.json`;
+}
+
+function sanitizeImportedDatabase(raw: unknown): InlineDatabase | null {
+  const normalized = normalizeDatabase(raw);
+  if (!normalized) return null;
+
+  const validProps = normalized.properties.filter(
+    (prop): prop is DatabasePropertySchema =>
+      Boolean(prop) &&
+      typeof prop === "object" &&
+      typeof prop.id === "string" &&
+      prop.id.length > 0 &&
+      typeof prop.name === "string" &&
+      VALID_PROPERTY_TYPES.has(prop.type)
+  );
+
+  const validViews = normalized.views.filter(
+    (view) =>
+      Boolean(view) &&
+      typeof view === "object" &&
+      typeof view.id === "string" &&
+      view.id.length > 0 &&
+      typeof view.name === "string" &&
+      VALID_VIEW_TYPES.has(view.type) &&
+      Array.isArray(view.visiblePropertyIds)
+  );
+
+  if (validProps.length === 0 || validViews.length === 0) {
+    return null;
+  }
+
+  return {
+    ...normalized,
+    properties: validProps,
+    views: validViews,
+  };
+}
+
+/** Parses, validates, and sanitizes an uploaded workspace JSON string before import. */
+export function parseWorkspaceImport(
+  rawText: string
+): { ok: true; data: ParsedImportResult } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    return { ok: false, error: "File is not valid JSON." };
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      ok: false,
+      error: "Invalid export file: expected a JSON object.",
+    };
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  if (
+    "format" in obj &&
+    obj.format !== undefined &&
+    obj.format !== WORKSPACE_EXPORT_FORMAT
+  ) {
+    return {
+      ok: false,
+      error: "Unsupported file format. Expected an MAA workspace JSON file.",
+    };
+  }
+
+  if (
+    "schemaVersion" in obj &&
+    obj.schemaVersion !== undefined &&
+    obj.schemaVersion !== WORKSPACE_EXPORT_SCHEMA_VERSION
+  ) {
+    return {
+      ok: false,
+      error: `Unsupported schema version (${String(obj.schemaVersion)}).`,
+    };
+  }
+
+  if (!Array.isArray(obj.docs)) {
+    return {
+      ok: false,
+      error: 'Invalid export file: missing "docs" array.',
+    };
+  }
+
+  if (obj.databases !== undefined && !Array.isArray(obj.databases)) {
+    return {
+      ok: false,
+      error: 'Invalid export file: "databases" must be an array.',
+    };
+  }
+
+  const docs: Doc[] = [];
+  const seenDocIds = new Set<string>();
+  let skippedDocCount = 0;
+
+  for (const rawDoc of obj.docs) {
+    const normalized = normalizeDoc(rawDoc);
+    if (!normalized || seenDocIds.has(normalized.id)) {
+      skippedDocCount += 1;
+      continue;
+    }
+    seenDocIds.add(normalized.id);
+    docs.push(normalized);
+  }
+
+  const databases: InlineDatabase[] = [];
+  const seenDbIds = new Set<string>();
+  let skippedDatabaseCount = 0;
+
+  for (const rawDb of obj.databases ?? []) {
+    const normalized = sanitizeImportedDatabase(rawDb);
+    if (!normalized || seenDbIds.has(normalized.id)) {
+      skippedDatabaseCount += 1;
+      continue;
+    }
+    seenDbIds.add(normalized.id);
+    databases.push(normalized);
+  }
+
+  if (docs.length === 0 && databases.length === 0) {
+    return {
+      ok: false,
+      error: "This file does not contain any valid documents or databases.",
+    };
+  }
+
+  const warnings: string[] = [];
+  if (skippedDocCount > 0) {
+    warnings.push(
+      `Skipped ${skippedDocCount} invalid or duplicate ${skippedDocCount === 1 ? "document" : "documents"}.`
+    );
+  }
+  if (skippedDatabaseCount > 0) {
+    warnings.push(
+      `Skipped ${skippedDatabaseCount} invalid or duplicate ${skippedDatabaseCount === 1 ? "database" : "databases"}.`
+    );
+  }
+
+  return {
+    ok: true,
+    data: {
+      bundle: {
+        format: WORKSPACE_EXPORT_FORMAT,
+        schemaVersion: WORKSPACE_EXPORT_SCHEMA_VERSION,
+        exportedAt:
+          typeof obj.exportedAt === "string"
+            ? obj.exportedAt
+            : new Date().toISOString(),
+        docs,
+        databases,
+      },
+      docCount: docs.length,
+      databaseCount: databases.length,
+      skippedDocCount,
+      skippedDatabaseCount,
+      warnings,
+    },
+  };
+}
+
+function collectSyncGroupIdsFromBlocks(
+  blocks: DocBlock[],
+  target: Set<string>
+) {
+  for (const block of blocks) {
+    if (block.syncGroupId) {
+      target.add(block.syncGroupId);
+    }
+    if (block.type === "columns" && Array.isArray(block.columns)) {
+      for (const col of block.columns) {
+        collectSyncGroupIdsFromBlocks(col, target);
+      }
+    }
+  }
+}
+
+function remapImportedBlocks(
+  blocks: DocBlock[],
+  docIdMap: Map<string, string>,
+  dbIdMap: Map<string, string>,
+  syncGroupIdMap: Map<string, string>,
+  currentDocIds: ReadonlySet<string>,
+  currentDbIds: ReadonlySet<string>
+): DocBlock[] {
+  return blocks.map((block) => {
+    const nextBlock: DocBlock = {
+      ...block,
+      id: createId(),
+    };
+
+    if (block.syncGroupId) {
+      nextBlock.syncGroupId =
+        syncGroupIdMap.get(block.syncGroupId) ?? block.syncGroupId;
+    }
+
+    if (block.databaseId) {
+      const mappedDb = dbIdMap.get(block.databaseId);
+      if (mappedDb) {
+        nextBlock.databaseId = mappedDb;
+      } else if (!currentDbIds.has(block.databaseId)) {
+        delete nextBlock.databaseId;
+      }
+    }
+
+    if (block.linkedDocId) {
+      const mappedDoc = docIdMap.get(block.linkedDocId);
+      if (mappedDoc) {
+        nextBlock.linkedDocId = mappedDoc;
+      } else if (!currentDocIds.has(block.linkedDocId)) {
+        delete nextBlock.linkedDocId;
+      }
+    }
+
+    if (block.type === "columns" && Array.isArray(block.columns)) {
+      nextBlock.columns = block.columns.map((col) =>
+        remapImportedBlocks(
+          col,
+          docIdMap,
+          dbIdMap,
+          syncGroupIdMap,
+          currentDocIds,
+          currentDbIds
+        )
+      );
+    }
+
+    return nextBlock;
+  });
+}
+
+function cleanDanglingBlockLinks(
+  blocks: DocBlock[],
+  docIdSet: ReadonlySet<string>,
+  dbIdSet: ReadonlySet<string>
+): DocBlock[] {
+  return blocks.map((block) => {
+    const nextBlock: DocBlock = { ...block };
+    if (nextBlock.databaseId && !dbIdSet.has(nextBlock.databaseId)) {
+      delete nextBlock.databaseId;
+    }
+    if (nextBlock.linkedDocId && !docIdSet.has(nextBlock.linkedDocId)) {
+      delete nextBlock.linkedDocId;
+    }
+    if (nextBlock.type === "columns" && Array.isArray(nextBlock.columns)) {
+      nextBlock.columns = nextBlock.columns.map((col) =>
+        cleanDanglingBlockLinks(col, docIdSet, dbIdSet)
+      );
+    }
+    return nextBlock;
+  });
+}
+
+/** Ensures parentId, databaseId, block references, and relation links remain valid and cycle-free. */
+export function repairWorkspaceReferences(
+  docs: Doc[],
+  databases: InlineDatabase[]
+): { docs: Doc[]; databases: InlineDatabase[] } {
+  const docIdSet = new Set(docs.map((doc) => doc.id));
+  const validDatabases = databases.filter((db) => docIdSet.has(db.parentDocId));
+  const dbIdSet = new Set(validDatabases.map((db) => db.id));
+
+  const repairedDatabases = validDatabases.map((db) => ({
+    ...db,
+    properties: db.properties.map((prop) => {
+      if (prop.relationDatabaseId && !dbIdSet.has(prop.relationDatabaseId)) {
+        const nextProp = { ...prop };
+        delete nextProp.relationDatabaseId;
+        return nextProp;
+      }
+      return prop;
+    }),
+  }));
+
+  const repairedDocs = docs.map((doc) => {
+    const nextDoc: Doc = {
+      ...doc,
+      blocks: cleanDanglingBlockLinks(doc.blocks, docIdSet, dbIdSet),
+    };
+    if (
+      nextDoc.parentId &&
+      (!docIdSet.has(nextDoc.parentId) || nextDoc.parentId === nextDoc.id)
+    ) {
+      delete nextDoc.parentId;
+    }
+    if (nextDoc.databaseId && !dbIdSet.has(nextDoc.databaseId)) {
+      delete nextDoc.databaseId;
+    }
+    return nextDoc;
+  });
+
+  // Break any parent cycles deterministically while preserving acyclic ancestry.
+  for (let i = 0; i < repairedDocs.length; i += 1) {
+    const doc = repairedDocs[i];
+    if (doc.parentId && isDocDescendant(repairedDocs, doc.parentId, doc.id)) {
+      const nextDoc = { ...doc };
+      delete nextDoc.parentId;
+      repairedDocs[i] = nextDoc;
+    }
+  }
+
+  return { docs: repairedDocs, databases: repairedDatabases };
+}
+
+/** Computes the next workspace state for either "merge" (remap imported IDs) or "replace". */
+export function prepareImportState(
+  currentDocs: Doc[],
+  currentDatabases: InlineDatabase[],
+  bundle: WorkspaceExportBundle,
+  mode: ImportMode
+): { docs: Doc[]; databases: InlineDatabase[] } {
+  if (mode === "replace") {
+    return repairWorkspaceReferences(bundle.docs, bundle.databases);
+  }
+
+  const currentDocIds = new Set(currentDocs.map((doc) => doc.id));
+  const currentDbIds = new Set(currentDatabases.map((db) => db.id));
+  const docIdMap = new Map<string, string>();
+  const dbIdMap = new Map<string, string>();
+  const syncGroupIdMap = new Map<string, string>();
+  const rawSyncIds = new Set<string>();
+
+  for (const doc of bundle.docs) {
+    docIdMap.set(doc.id, createId());
+    collectSyncGroupIdsFromBlocks(doc.blocks, rawSyncIds);
+  }
+  for (const syncId of rawSyncIds) {
+    syncGroupIdMap.set(syncId, createId());
+  }
+  for (const db of bundle.databases) {
+    dbIdMap.set(db.id, createId());
+  }
+
+  const remappedDbs: InlineDatabase[] = bundle.databases.map((db) => ({
+    ...db,
+    id: dbIdMap.get(db.id) ?? createId(),
+    parentDocId: docIdMap.get(db.parentDocId) ?? db.parentDocId,
+    properties: db.properties.map((prop) => {
+      if (!prop.relationDatabaseId) return prop;
+      const mappedTarget = dbIdMap.get(prop.relationDatabaseId);
+      if (mappedTarget) {
+        return { ...prop, relationDatabaseId: mappedTarget };
+      }
+      if (currentDbIds.has(prop.relationDatabaseId)) {
+        return prop;
+      }
+      const nextProp = { ...prop };
+      delete nextProp.relationDatabaseId;
+      return nextProp;
+    }),
+  }));
+
+  const dbSchemaByNewId = new Map(remappedDbs.map((db) => [db.id, db]));
+
+  const remappedDocs: Doc[] = bundle.docs.map((doc) => {
+    const nextId = docIdMap.get(doc.id) ?? createId();
+    const nextDbId = doc.databaseId
+      ? (dbIdMap.get(doc.databaseId) ??
+        (currentDbIds.has(doc.databaseId) ? doc.databaseId : undefined))
+      : undefined;
+    const nextParentId = doc.parentId
+      ? (docIdMap.get(doc.parentId) ??
+        (currentDocIds.has(doc.parentId) ? doc.parentId : undefined))
+      : undefined;
+
+    let nextProperties = doc.properties;
+    if (nextProperties && nextDbId) {
+      const schema = dbSchemaByNewId.get(nextDbId);
+      if (schema) {
+        const relationPropIds = new Set(
+          schema.properties
+            .filter((prop) => prop.type === "relation")
+            .map((prop) => prop.id)
+        );
+        if (relationPropIds.size > 0) {
+          const updatedProps = { ...nextProperties };
+          for (const propId of relationPropIds) {
+            const val = updatedProps[propId];
+            if (Array.isArray(val)) {
+              updatedProps[propId] = val.map((id) => docIdMap.get(id) ?? id);
+            }
+          }
+          nextProperties = updatedProps;
+        }
+      }
+    }
+
+    const nextDoc: Doc = {
+      ...doc,
+      id: nextId,
+      blocks: remapImportedBlocks(
+        doc.blocks,
+        docIdMap,
+        dbIdMap,
+        syncGroupIdMap,
+        currentDocIds,
+        currentDbIds
+      ),
+    };
+    if (nextParentId) {
+      nextDoc.parentId = nextParentId;
+    } else {
+      delete nextDoc.parentId;
+    }
+    if (nextDbId) {
+      nextDoc.databaseId = nextDbId;
+    } else {
+      delete nextDoc.databaseId;
+    }
+    if (nextProperties) {
+      nextDoc.properties = nextProperties;
+    }
+    return nextDoc;
+  });
+
+  return repairWorkspaceReferences(
+    [...currentDocs, ...remappedDocs],
+    [...currentDatabases, ...remappedDbs]
+  );
+}
