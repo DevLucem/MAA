@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { Suspense, useEffect, useId, useState } from "react";
 import { Icon } from "../assets/icons";
 import { AgentProvider, useAgent } from "../lib/agent-store";
@@ -7,10 +8,17 @@ import { DocsProvider } from "../lib/docs-store";
 import { FinanceProvider } from "../lib/finance-store";
 import { TodosProvider } from "../lib/todos-store";
 import {
+  recordRecentRoute,
+  updateUiPrefs,
+  useUiPrefs,
+} from "../lib/ui-prefs";
+import { WorkspaceServerProvider } from "../lib/workspace-server-store";
+import {
   AgentFloatingWidget,
   AgentRightSidebar,
 } from "./AgentCompanionWidget";
 import { AppToolbar } from "./AppToolbar";
+import { DebouncedAutoSave } from "./DebouncedAutoSave";
 import { DocsSidebar } from "./DocsSidebar";
 import { FinanceSidebar } from "./FinanceSidebar";
 import { TransactionDialogHost } from "./finance/TransactionDialog";
@@ -18,10 +26,21 @@ import { SettingsDialog } from "./SettingsDialog";
 import { TodoDialogsHost } from "./todos/TodoDialogsHost";
 import { TodosSidebar } from "./TodosSidebar";
 
+function RecentRouteTracker() {
+  const pathname = usePathname();
+  useEffect(() => {
+    if (pathname) {
+      recordRecentRoute(pathname);
+    }
+  }, [pathname]);
+  return null;
+}
+
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const sidebarId = useId();
   const { settingsOpen, openSettings, closeSettings } = useAgent();
-  const [desktopOpen, setDesktopOpen] = useState(true);
+  const uiPrefs = useUiPrefs();
+  const desktopOpen = uiPrefs.desktopSidebarOpen ?? true;
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -90,7 +109,12 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               sidebarId={sidebarId}
               desktopOpen={desktopOpen}
               mobileOpen={mobileOpen}
-              onToggleDesktop={() => setDesktopOpen((prev) => !prev)}
+              onToggleDesktop={() =>
+                updateUiPrefs((prev) => ({
+                  ...prev,
+                  desktopSidebarOpen: !(prev.desktopSidebarOpen ?? true),
+                }))
+              }
               onToggleMobile={() => setMobileOpen((prev) => !prev)}
             />
           </Suspense>
@@ -109,7 +133,9 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       </Suspense>
       <SettingsDialog open={settingsOpen} onClose={closeSettings} />
       <TransactionDialogHost />
+      <DebouncedAutoSave />
       <Suspense fallback={null}>
+        <RecentRouteTracker />
         <TodoDialogsHost />
       </Suspense>
     </>
@@ -119,14 +145,16 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
 /** Three-region layout shell with a toggleable sidebar, contextual toolbar, and main canvas. */
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <DocsProvider>
-      <FinanceProvider>
-        <TodosProvider>
-          <AgentProvider>
-            <AppShellInner>{children}</AppShellInner>
-          </AgentProvider>
-        </TodosProvider>
-      </FinanceProvider>
-    </DocsProvider>
+    <WorkspaceServerProvider>
+      <DocsProvider>
+        <FinanceProvider>
+          <TodosProvider>
+            <AgentProvider>
+              <AppShellInner>{children}</AppShellInner>
+            </AgentProvider>
+          </TodosProvider>
+        </FinanceProvider>
+      </DocsProvider>
+    </WorkspaceServerProvider>
   );
 }

@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -17,13 +18,7 @@ import {
 import {
   applyMoveDoc,
   collectDeletedTree,
-  DATABASES_STORAGE_KEY,
   duplicateBlocksWithFreshIds,
-  normalizeDatabase,
-  normalizeDoc,
-  saveDatabases,
-  saveDocs,
-  STORAGE_KEY,
   toggleTodoInBlockList,
 } from "./docs-storage";
 import {
@@ -46,6 +41,7 @@ import {
   propagateSyncedBlocks,
   pruneUnreferencedDatabases,
 } from "./synced-blocks";
+import { useWorkspaceServer } from "./workspace-server-store";
 
 type DocPatch = Partial<
   Pick<Doc, "title" | "blocks" | "icon" | "cover" | "fullWidth" | "properties">
@@ -66,6 +62,7 @@ type DatabasePatch = Partial<
 
 interface DocsContextValue {
   hydrated: boolean;
+  hydratedRevision: number;
   docs: Doc[];
   databases: InlineDatabase[];
   trashedDocs: Doc[];
@@ -104,6 +101,7 @@ interface DocsContextValue {
     propertyId: string,
     value: PropertyValue
   ) => void;
+  getExportSnapshot: () => { docs: Doc[]; databases: InlineDatabase[] };
   importWorkspace: (
     bundle: WorkspaceExportBundle,
     mode: ImportMode
@@ -123,77 +121,54 @@ interface DocsContextValue {
 
 const DocsContext = createContext<DocsContextValue | null>(null);
 
-/** Provides shared document and inline database state persisted to localStorage. */
+/** Provides shared document and inline database state synchronized with the server workspace store. */
 export function DocsProvider({ children }: { children: React.ReactNode }) {
+  const { loaded, loadRevision, initialState } = useWorkspaceServer();
+
   const [allDocs, setAllDocs] = useState<Doc[]>([]);
   const [allDatabases, setAllDatabases] = useState<InlineDatabase[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedRevision, setHydratedRevision] = useState(0);
   const [syncedClipboardId, setSyncedClipboardId] = useState<string | null>(null);
+  const lastAppliedRevisionRef = useRef(0);
+
+  const hydrated = hydratedRevision > 0;
 
   useEffect(() => {
-    try {
-      const storedDocsRaw = localStorage.getItem(STORAGE_KEY);
-      const storedDbsRaw = localStorage.getItem(DATABASES_STORAGE_KEY);
+    if (!loaded || loadRevision === 0) return;
+    if (lastAppliedRevisionRef.current === loadRevision) return;
+    lastAppliedRevisionRef.current = loadRevision;
 
-      let loadedDocs: Doc[] = [];
-      let loadedDbs: InlineDatabase[] = [];
+    let loadedDocs = initialState.docs;
+    let loadedDbs = initialState.databases;
 
-      if (storedDocsRaw) {
-        const rawDocs = JSON.parse(storedDocsRaw);
-        if (Array.isArray(rawDocs)) {
-          loadedDocs = rawDocs
-            .map(normalizeDoc)
-            .filter((doc): doc is Doc => doc !== null);
-        }
+    const activeDocs = loadedDocs.filter((doc) => !doc.trashedAt);
+    const trashedLoadedDocs = loadedDocs.filter((doc) =>
+      Boolean(doc.trashedAt)
+    );
+    const activeDbs = loadedDbs.filter((db) => !db.trashedAt);
+    const trashedLoadedDbs = loadedDbs.filter((db) => Boolean(db.trashedAt));
+
+    if (activeDbs.length > 0) {
+      const referencedDbIds = collectAllDatabaseIdsInDocs(activeDocs);
+      const orphanDbIds = activeDbs
+        .filter((db) => !referencedDbIds.has(db.id))
+        .map((db) => db.id);
+      if (orphanDbIds.length > 0) {
+        const pruned = pruneUnreferencedDatabases(
+          activeDocs,
+          activeDbs,
+          orphanDbIds
+        );
+        loadedDocs = [...pruned.docs, ...trashedLoadedDocs];
+        loadedDbs = [...pruned.databases, ...trashedLoadedDbs];
       }
-
-      if (storedDbsRaw) {
-        const rawDbs = JSON.parse(storedDbsRaw);
-        if (Array.isArray(rawDbs)) {
-          loadedDbs = rawDbs
-            .map(normalizeDatabase)
-            .filter((db): db is InlineDatabase => db !== null);
-        }
-      }
-
-      const activeDocs = loadedDocs.filter((doc) => !doc.trashedAt);
-      const trashedLoadedDocs = loadedDocs.filter((doc) =>
-        Boolean(doc.trashedAt)
-      );
-      const activeDbs = loadedDbs.filter((db) => !db.trashedAt);
-      const trashedLoadedDbs = loadedDbs.filter((db) => Boolean(db.trashedAt));
-
-      if (activeDbs.length > 0) {
-        const referencedDbIds = collectAllDatabaseIdsInDocs(activeDocs);
-        const orphanDbIds = activeDbs
-          .filter((db) => !referencedDbIds.has(db.id))
-          .map((db) => db.id);
-        if (orphanDbIds.length > 0) {
-          const pruned = pruneUnreferencedDatabases(
-            activeDocs,
-            activeDbs,
-            orphanDbIds
-          );
-          loadedDocs = [...pruned.docs, ...trashedLoadedDocs];
-          loadedDbs = [...pruned.databases, ...trashedLoadedDbs];
-          saveDocs(loadedDocs);
-          saveDatabases(loadedDbs);
-        }
-      }
-
-      if (loadedDocs.length > 0) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setAllDocs(loadedDocs);
-      }
-      if (loadedDbs.length > 0) {
-        setAllDatabases(loadedDbs);
-      }
-    } catch {
-      // Ignore malformed stored JSON
-    } finally {
-      setHydrated(true);
     }
-  }, []);
+
+    setAllDocs(loadedDocs);
+    setAllDatabases(loadedDbs);
+    setSyncedClipboardId(null);
+    setHydratedRevision(loadRevision);
+  }, [initialState, loadRevision, loaded]);
 
   const docs = useMemo(
     () => allDocs.filter((doc) => !doc.trashedAt),
@@ -243,11 +218,7 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
       updatedAt: now,
       ...(parentId ? { parentId } : {}),
     };
-    setAllDocs((prev) => {
-      const next = [newDoc, ...prev];
-      saveDocs(next);
-      return next;
-    });
+    setAllDocs((prev) => [newDoc, ...prev]);
     return newDoc;
   }, []);
 
@@ -280,11 +251,9 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
               id
             );
             const nextAllDocs = [...pruned.docs, ...trashedDocs];
-            saveDocs(nextAllDocs);
             setAllDocs(nextAllDocs);
             if (pruned.changed) {
               const nextAllDbs = [...pruned.databases, ...trashedDatabases];
-              saveDatabases(nextAllDbs);
               setAllDatabases(nextAllDbs);
             }
             return;
@@ -296,9 +265,7 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
         const rawNext = prev.map((doc) =>
           doc.id === id ? { ...doc, ...patch, updatedAt: now } : doc
         );
-        const next = propagateSyncedBlocks(prev, rawNext, id, now);
-        saveDocs(next);
-        return next;
+        return propagateSyncedBlocks(prev, rawNext, id, now);
       });
     },
     [databases, docs, trashedDatabases, trashedDocs]
@@ -316,20 +283,16 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
             }
           : doc
       );
-      const next = propagateSyncedBlocks(prev, rawNext, docId, now);
-      saveDocs(next);
-      return next;
+      return propagateSyncedBlocks(prev, rawNext, docId, now);
     });
   }, []);
 
   const toggleFavorite = useCallback((id: string) => {
-    setAllDocs((prev) => {
-      const next = prev.map((doc) =>
+    setAllDocs((prev) =>
+      prev.map((doc) =>
         doc.id === id ? { ...doc, favorite: !doc.favorite } : doc
-      );
-      saveDocs(next);
-      return next;
-    });
+      )
+    );
   }, []);
 
   const duplicateDoc = useCallback(
@@ -361,7 +324,6 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
         } else {
           next.splice(idx + 1, 0, copy);
         }
-        saveDocs(next);
         return next;
       });
 
@@ -379,12 +341,10 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
         const activePrev = prev.filter((doc) => !doc.trashedAt);
         const res = applyMoveDoc(activePrev, docId, target);
         if (!res.changed) return prev;
-        const next = [
+        return [
           ...res.next,
           ...prev.filter((doc) => Boolean(doc.trashedAt)),
         ];
-        saveDocs(next);
-        return next;
       });
       return true;
     },
@@ -423,8 +383,8 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
         finalTrashedDocIds.add(doc.id);
       }
 
-      setAllDocs((prev) => {
-        const next = prev.map((doc) => {
+      setAllDocs((prev) =>
+        prev.map((doc) => {
           if (finalTrashedDocIds.has(doc.id)) {
             return { ...doc, trashedAt: now, updatedAt: now };
           }
@@ -436,14 +396,12 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
             return { ...doc, parentId: survivedDbRehome.get(doc.databaseId) };
           }
           return doc;
-        });
-        saveDocs(next);
-        return next;
-      });
+        })
+      );
 
       if (trashedDbIds.size > 0 || survivedDbRehome.size > 0) {
-        setAllDatabases((prev) => {
-          const next = prev.map((db) => {
+        setAllDatabases((prev) =>
+          prev.map((db) => {
             if (trashedDbIds.has(db.id)) {
               return { ...db, trashedAt: now };
             }
@@ -451,10 +409,8 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
               return { ...db, parentDocId: survivedDbRehome.get(db.id)! };
             }
             return db;
-          });
-          saveDatabases(next);
-          return next;
-        });
+          })
+        );
       }
     },
     [databases, docs]
@@ -492,8 +448,8 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
       ]);
       const now = new Date().toISOString();
 
-      setAllDocs((prev) => {
-        const next = prev.map((doc) => {
+      setAllDocs((prev) =>
+        prev.map((doc) => {
           if (!toRestoreDocIds.has(doc.id)) return doc;
           const restored: Doc = { ...doc, updatedAt: now };
           delete restored.trashedAt;
@@ -507,22 +463,18 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
             delete restored.databaseId;
           }
           return restored;
-        });
-        saveDocs(next);
-        return next;
-      });
+        })
+      );
 
       if (toRestoreDbIds.size > 0) {
-        setAllDatabases((prev) => {
-          const next = prev.map((db) => {
+        setAllDatabases((prev) =>
+          prev.map((db) => {
             if (!toRestoreDbIds.has(db.id)) return db;
             const restored = { ...db };
             delete restored.trashedAt;
             return restored;
-          });
-          saveDatabases(next);
-          return next;
-        });
+          })
+        );
       }
 
       return {
@@ -550,18 +502,12 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
         for (const dbId of tree.deletedDbIds) purgeDbIds.add(dbId);
       }
 
-      setAllDocs((prev) => {
-        const next = prev.filter((doc) => !purgeDocIds.has(doc.id));
-        saveDocs(next);
-        return next;
-      });
+      setAllDocs((prev) => prev.filter((doc) => !purgeDocIds.has(doc.id)));
 
       if (purgeDbIds.size > 0) {
-        setAllDatabases((prev) => {
-          const next = prev.filter((db) => !purgeDbIds.has(db.id));
-          saveDatabases(next);
-          return next;
-        });
+        setAllDatabases((prev) =>
+          prev.filter((db) => !purgeDbIds.has(db.id))
+        );
       }
 
       return {
@@ -580,18 +526,10 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
       return { deletedDocsCount: 0, deletedDbsCount: 0 };
     }
 
-    setAllDocs((prev) => {
-      const next = prev.filter((doc) => !doc.trashedAt);
-      saveDocs(next);
-      return next;
-    });
+    setAllDocs((prev) => prev.filter((doc) => !doc.trashedAt));
 
     if (deletedDbsCount > 0) {
-      setAllDatabases((prev) => {
-        const next = prev.filter((db) => !db.trashedAt);
-        saveDatabases(next);
-        return next;
-      });
+      setAllDatabases((prev) => prev.filter((db) => !db.trashedAt));
     }
 
     return { deletedDocsCount, deletedDbsCount };
@@ -603,22 +541,16 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
       initialViewType: DatabaseViewType = "table"
     ): InlineDatabase => {
       const db = createDefaultDatabase(parentDocId, initialViewType, createId);
-      setAllDatabases((prev) => {
-        const next = [...prev, db];
-        saveDatabases(next);
-        return next;
-      });
+      setAllDatabases((prev) => [...prev, db]);
       return db;
     },
     []
   );
 
   const updateDatabase = useCallback((id: string, patch: DatabasePatch) => {
-    setAllDatabases((prev) => {
-      const next = prev.map((db) => (db.id === id ? { ...db, ...patch } : db));
-      saveDatabases(next);
-      return next;
-    });
+    setAllDatabases((prev) =>
+      prev.map((db) => (db.id === id ? { ...db, ...patch } : db))
+    );
   }, []);
 
   const createDatabaseRow = useCallback(
@@ -642,11 +574,7 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
         updatedAt: now,
       };
 
-      setAllDocs((prev) => {
-        const next = [...prev, newDoc];
-        saveDocs(next);
-        return next;
-      });
+      setAllDocs((prev) => [...prev, newDoc]);
       return newDoc;
     },
     [databases]
@@ -655,8 +583,8 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
   const updateDocProperty = useCallback(
     (docId: string, propertyId: string, value: PropertyValue) => {
       const now = new Date().toISOString();
-      setAllDocs((prev) => {
-        const next = prev.map((doc) => {
+      setAllDocs((prev) =>
+        prev.map((doc) => {
           if (doc.id !== docId) return doc;
           const db = doc.databaseId
             ? databases.find((item) => item.id === doc.databaseId)
@@ -679,19 +607,20 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
             properties: nextProps,
             updatedAt: now,
           };
-        });
-        saveDocs(next);
-        return next;
-      });
+        })
+      );
     },
     [databases]
+  );
+
+  const getExportSnapshot = useCallback(
+    () => ({ docs: allDocs, databases: allDatabases }),
+    [allDatabases, allDocs]
   );
 
   const importWorkspace = useCallback(
     (bundle: WorkspaceExportBundle, mode: ImportMode) => {
       const next = prepareImportState(allDocs, allDatabases, bundle, mode);
-      saveDocs(next.docs);
-      saveDatabases(next.databases);
       setAllDocs(next.docs);
       setAllDatabases(next.databases);
       return {
@@ -713,8 +642,8 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
 
       const syncGroupId = createId();
       const now = new Date().toISOString();
-      setAllDocs((prev) => {
-        const next = prev.map((doc) =>
+      setAllDocs((prev) =>
+        prev.map((doc) =>
           doc.id === docId
             ? {
                 ...doc,
@@ -724,10 +653,8 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
                 ),
               }
             : doc
-        );
-        saveDocs(next);
-        return next;
-      });
+        )
+      );
       return syncGroupId;
     },
     [docs]
@@ -786,7 +713,6 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
           }
           return { ...doc, updatedAt: now, blocks: res.blocks };
         });
-        saveDocs(next);
         return next;
       });
 
@@ -880,12 +806,10 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
           ...addedDbs,
           ...trashedDatabases,
         ];
-        saveDatabases(nextAllDatabases);
         setAllDatabases(nextAllDatabases);
       }
 
       const nextAllDocs = [...nextActiveDocs, ...trashedDocs];
-      saveDocs(nextAllDocs);
       setAllDocs(nextAllDocs);
     },
     [databases, docs, trashedDatabases, trashedDocs]
@@ -894,6 +818,7 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<DocsContextValue>(
     () => ({
       hydrated,
+      hydratedRevision,
       docs,
       databases,
       trashedDocs,
@@ -915,6 +840,7 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
       updateDatabase,
       createDatabaseRow,
       updateDocProperty,
+      getExportSnapshot,
       importWorkspace,
       syncedClipboardId,
       ensureBlockSynced,
@@ -936,7 +862,9 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
       getDatabase,
       getDatabaseRows,
       getDoc,
+      getExportSnapshot,
       hydrated,
+      hydratedRevision,
       importWorkspace,
       insertSyncedBlock,
       moveDoc,

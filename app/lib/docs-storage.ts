@@ -69,7 +69,15 @@ function normalizeTodoEmbed(raw: unknown): TodoEmbedConfig | undefined {
   return cfg;
 }
 
-export function normalizeBlock(raw: unknown): DocBlock | null {
+export interface NormalizeDocOptions {
+  /** Skip browser-only DOM HTML sanitization (used on Node server store read/write). */
+  preserveHtml?: boolean;
+}
+
+export function normalizeBlock(
+  raw: unknown,
+  options?: NormalizeDocOptions
+): DocBlock | null {
   if (!raw || typeof raw !== "object") return null;
   const b = raw as Record<string, unknown>;
   const type = VALID_BLOCK_TYPES.has(b.type as BlockType)
@@ -77,7 +85,7 @@ export function normalizeBlock(raw: unknown): DocBlock | null {
     : "paragraph";
   const content =
     typeof b.content === "string"
-      ? type === "code"
+      ? type === "code" || options?.preserveHtml
         ? b.content
         : sanitizeInlineHtml(b.content)
       : "";
@@ -122,7 +130,7 @@ export function normalizeBlock(raw: unknown): DocBlock | null {
     normalized.columns = b.columns.map((col) =>
       Array.isArray(col)
         ? col
-            .map(normalizeBlock)
+            .map((entry) => normalizeBlock(entry, options))
             .filter((entry): entry is DocBlock => entry !== null)
         : []
     );
@@ -167,14 +175,17 @@ export function normalizeProperties(
   return result;
 }
 
-export function normalizeDoc(raw: unknown): Doc | null {
+export function normalizeDoc(
+  raw: unknown,
+  options?: NormalizeDocOptions
+): Doc | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Record<string, unknown>;
   if (typeof item.id !== "string" || !item.id) return null;
 
   const rawBlocks = Array.isArray(item.blocks) ? item.blocks : [];
   const blocks = rawBlocks
-    .map(normalizeBlock)
+    .map((block) => normalizeBlock(block, options))
     .filter((b): b is DocBlock => b !== null);
 
   const normalizedProps = normalizeProperties(item.properties);

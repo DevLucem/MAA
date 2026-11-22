@@ -28,10 +28,9 @@ import {
 } from "./hermes-client";
 import { useTodos } from "./todos-store";
 import { projectDisplayName } from "./todos-utils";
+import { updateUiPrefs, useUiPrefs } from "./ui-prefs";
 import { useTodayIsoDate } from "./use-client-date";
-
-export const HERMES_CONFIG_STORAGE_KEY = "maa-hermes-config-v1";
-export const HERMES_SESSIONS_STORAGE_KEY = "maa-hermes-sessions-v1";
+import { useWorkspaceServer } from "./workspace-server-store";
 
 export type SettingsSectionId = "agent" | "data" | "trash";
 export type AgentWidgetMode = "closed" | "floating" | "sidebar";
@@ -63,6 +62,7 @@ const FALLBACK_SESSION: AgentChatSession = {
 
 interface AgentContextValue {
   hydrated: boolean;
+  hydratedRevision: number;
   config: HermesAgentConfig;
   updateConfig: (patch: Partial<HermesAgentConfig>) => void;
   resetConfig: () => void;
@@ -115,6 +115,8 @@ interface AgentContextValue {
 const AgentContext = createContext<AgentContextValue | null>(null);
 
 export function AgentProvider({ children }: { children: React.ReactNode }) {
+  const { loaded, loadRevision, initialState } = useWorkspaceServer();
+  const uiPrefs = useUiPrefs();
   const { docs, databases } = useDocs();
   const { accounts, transactions } = useFinance();
   const {
@@ -125,17 +127,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   } = useTodos();
   const todayIso = useTodayIsoDate() ?? "";
 
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedRevision, setHydratedRevision] = useState(0);
   const [config, setConfig] = useState<HermesAgentConfig>(
     DEFAULT_HERMES_CONFIG
   );
   const [sessions, setSessions] = useState<AgentChatSession[]>([
     FALLBACK_SESSION,
   ]);
-  const [activeSessionId, setActiveSessionId] = useState<string>(
-    FALLBACK_SESSION.id
-  );
-  const [widgetMode, setWidgetMode] = useState<AgentWidgetMode>("closed");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("agent");
@@ -151,60 +149,48 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   }>({ status: "idle" });
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lastAppliedRevisionRef = useRef(0);
+
+  const hydrated = hydratedRevision > 0;
+  const widgetMode: AgentWidgetMode = uiPrefs.agentWidgetMode ?? "closed";
+
+  const setWidgetMode = useCallback((mode: AgentWidgetMode) => {
+    updateUiPrefs({ agentWidgetMode: mode });
+  }, []);
+
+  const setActiveSessionId = useCallback((id: string) => {
+    updateUiPrefs({ agentActiveSessionId: id });
+  }, []);
+
+  const activeSessionId = useMemo(
+    () =>
+      uiPrefs.agentActiveSessionId &&
+      sessions.some((s) => s.id === uiPrefs.agentActiveSessionId)
+        ? uiPrefs.agentActiveSessionId
+        : (sessions[0]?.id ?? FALLBACK_SESSION.id),
+    [sessions, uiPrefs.agentActiveSessionId]
+  );
 
   useEffect(() => {
-    try {
-      const rawConfig = localStorage.getItem(HERMES_CONFIG_STORAGE_KEY);
-      if (rawConfig) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setConfig(normalizeHermesConfig(JSON.parse(rawConfig)));
-      }
-      const rawSessions = localStorage.getItem(HERMES_SESSIONS_STORAGE_KEY);
-      if (rawSessions) {
-        const parsed = normalizeAgentSessions(JSON.parse(rawSessions));
-        if (parsed.length > 0) {
-          setSessions(parsed);
-          setActiveSessionId(parsed[0].id);
-        }
-      }
-    } catch {
-      // Ignore storage access errors
-    } finally {
-      setHydrated(true);
-    }
-  }, []);
+    if (!loaded || loadRevision === 0) return;
+    if (lastAppliedRevisionRef.current === loadRevision) return;
+    lastAppliedRevisionRef.current = loadRevision;
 
-  const persistConfig = useCallback((next: HermesAgentConfig) => {
-    try {
-      localStorage.setItem(HERMES_CONFIG_STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // Ignore storage quota errors
-    }
-  }, []);
+    const agentData = initialState.agent;
+    setConfig(agentData.config);
+    setSessions(
+      agentData.sessions.length > 0 ? agentData.sessions : [FALLBACK_SESSION]
+    );
+    setHydratedRevision(loadRevision);
+  }, [initialState, loadRevision, loaded]);
 
-  const persistSessions = useCallback((next: AgentChatSession[]) => {
-    try {
-      localStorage.setItem(HERMES_SESSIONS_STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // Ignore storage quota errors
-    }
+  const updateConfig = useCallback((patch: Partial<HermesAgentConfig>) => {
+    setConfig((prev) => normalizeHermesConfig({ ...prev, ...patch }));
   }, []);
-
-  const updateConfig = useCallback(
-    (patch: Partial<HermesAgentConfig>) => {
-      setConfig((prev) => {
-        const next = normalizeHermesConfig({ ...prev, ...patch });
-        persistConfig(next);
-        return next;
-      });
-    },
-    [persistConfig]
-  );
 
   const resetConfig = useCallback(() => {
     setConfig(DEFAULT_HERMES_CONFIG);
-    persistConfig(DEFAULT_HERMES_CONFIG);
-  }, [persistConfig]);
+  }, []);
 
   const createSession = useCallback(
     (title?: string, customSessionKey?: string): AgentChatSession => {
@@ -212,82 +198,57 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         title?.trim() || "New Agent Session",
         customSessionKey
       );
-      setSessions((prev) => {
-        const next = [created, ...prev];
-        persistSessions(next);
-        return next;
-      });
+      setSessions((prev) => [created, ...prev]);
       setActiveSessionId(created.id);
       return created;
     },
-    [persistSessions]
+    [setActiveSessionId]
   );
 
-  const deleteSession = useCallback(
-    (id: string) => {
-      setSessions((prev) => {
-        const remaining = prev.filter((s) => s.id !== id);
-        const next =
-          remaining.length > 0
-            ? remaining
-            : [buildInitialSession("General Assistant")];
-        persistSessions(next);
-        setActiveSessionId((currId) => (currId === id ? next[0].id : currId));
-        return next;
-      });
-    },
-    [persistSessions]
-  );
+  const deleteSession = useCallback((id: string) => {
+    setSessions((prev) => {
+      const remaining = prev.filter((s) => s.id !== id);
+      return remaining.length > 0
+        ? remaining
+        : [buildInitialSession("General Assistant")];
+    });
+  }, []);
 
-  const renameSession = useCallback(
-    (id: string, title: string) => {
-      const clean = title.trim() || "Untitled Session";
-      setSessions((prev) => {
-        const next = prev.map((s) =>
-          s.id === id
-            ? { ...s, title: clean, updatedAt: new Date().toISOString() }
-            : s
-        );
-        persistSessions(next);
-        return next;
-      });
-    },
-    [persistSessions]
-  );
+  const renameSession = useCallback((id: string, title: string) => {
+    const clean = title.trim() || "Untitled Session";
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? { ...s, title: clean, updatedAt: new Date().toISOString() }
+          : s
+      )
+    );
+  }, []);
 
-  const clearSessionMessages = useCallback(
-    (id: string) => {
-      setSessions((prev) => {
-        const next = prev.map((s) =>
-          s.id === id
-            ? {
-                ...s,
-                messages: [],
-                activeRunId: undefined,
-                lastResponseId: undefined,
-                updatedAt: new Date().toISOString(),
-              }
-            : s
-        );
-        persistSessions(next);
-        return next;
-      });
-    },
-    [persistSessions]
-  );
+  const clearSessionMessages = useCallback((id: string) => {
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              messages: [],
+              activeRunId: undefined,
+              lastResponseId: undefined,
+              updatedAt: new Date().toISOString(),
+            }
+          : s
+      )
+    );
+  }, []);
 
   const updateSession = useCallback(
     (
       id: string,
       updater: (session: AgentChatSession) => AgentChatSession
     ) => {
-      setSessions((prev) => {
-        const next = prev.map((s) => (s.id === id ? updater(s) : s));
-        persistSessions(next);
-        return next;
-      });
+      setSessions((prev) => prev.map((s) => (s.id === id ? updater(s) : s)));
     },
-    [persistSessions]
+    []
   );
 
   const importAgent = useCallback(
@@ -299,14 +260,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
       if (mode === "replace") {
         const nextConfig = normalizeHermesConfig(data.config);
-        persistConfig(nextConfig);
         setConfig(nextConfig);
 
         const nextSessions =
           normalizedSessions.length > 0
             ? normalizedSessions
             : [buildInitialSession("General Assistant")];
-        persistSessions(nextSessions);
         setSessions(nextSessions);
         setActiveSessionId(nextSessions[0].id);
 
@@ -344,7 +303,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           ? [...base, ...remapped]
           : [buildInitialSession("General Assistant")];
 
-      persistSessions(nextSessions);
       setSessions(nextSessions);
       if (!nextSessions.some((s) => s.id === activeSessionId)) {
         setActiveSessionId(nextSessions[0].id);
@@ -355,7 +313,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         configUpdated: false,
       };
     },
-    [activeSessionId, persistConfig, persistSessions, sessions]
+    [activeSessionId, sessions, setActiveSessionId]
   );
 
   const activeSession = useMemo(
@@ -762,6 +720,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AgentContextValue>(
     () => ({
       hydrated,
+      hydratedRevision,
       config,
       updateConfig,
       resetConfig,
@@ -796,11 +755,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       hydrated,
+      hydratedRevision,
       config,
       updateConfig,
       resetConfig,
       sessions,
       activeSession,
+      setActiveSessionId,
       createSession,
       deleteSession,
       renameSession,
@@ -816,6 +777,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       approveRun,
       clarifyRun,
       widgetMode,
+      setWidgetMode,
       settingsOpen,
       settingsSection,
       openSettings,

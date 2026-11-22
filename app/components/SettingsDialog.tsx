@@ -17,6 +17,7 @@ import { useFinance } from "../lib/finance-store";
 import { collectAccountSubtree } from "../lib/finance-utils";
 import { useTodos } from "../lib/todos-store";
 import { collectProjectSubtree } from "../lib/todos-utils";
+import { useWorkspaceServer } from "../lib/workspace-server-store";
 import { AgentSettingsPanel } from "./AgentSettingsPanel";
 import { TrashSettingsPanel } from "./TrashSettingsPanel";
 
@@ -90,6 +91,13 @@ export function SettingsDialog({
     getExportSnapshot: getTodosExportSnapshot,
     importTodos,
   } = useTodos();
+  const {
+    saveStatus,
+    saveError,
+    loadError,
+    lastSavedAt,
+    reloadFromServer,
+  } = useWorkspaceServer();
   const trashCount =
     trashedDocs.length + trashedAccounts.length + trashedProjects.length;
   const financeSnapshot = getExportSnapshot();
@@ -579,6 +587,43 @@ export function SettingsDialog({
               <TrashSettingsPanel onFeedback={(msg) => setFeedback(msg)} />
             ) : (
               <>
+                {/* Server Storage Section */}
+                <section className="rounded-lg border border-border bg-canvas/50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Server storage (data/store.json)
+                      </h3>
+                      <p className="mt-1 text-xs leading-relaxed text-muted">
+                        Docs, databases, finance records, tasks, and agent configuration auto-save to the server. UI preferences such as theme, sidebar expansion, active tabs, and recent routes stay in your browser.
+                      </p>
+                      <p className="mt-2 text-xs font-medium text-foreground">
+                        {saveStatus === "saving"
+                          ? "Saving…"
+                          : saveStatus === "error" || loadError
+                            ? `Sync error: ${saveError || loadError}`
+                            : lastSavedAt
+                              ? `Saved · ${new Date(lastSavedAt).toLocaleTimeString()}`
+                              : "Saved"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void reloadFromServer().then((ok) => {
+                          if (ok) {
+                            setImportError(null);
+                            setFeedback("Reloaded workspace state from server.");
+                          }
+                        });
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-2 focus-visible:outline-primary"
+                    >
+                      Reload from server
+                    </button>
+                  </div>
+                </section>
+
                 {/* Export Workspace Section */}
             <section className="rounded-lg border border-border bg-canvas/50 p-4">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">

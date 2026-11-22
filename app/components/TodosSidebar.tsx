@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useId, useMemo, useState } from "react";
 import { Icon } from "../assets/icons";
 import { useTodos } from "../lib/todos-store";
+import { updateUiPrefs, useUiPrefs } from "../lib/ui-prefs";
 import {
   buildProjectTree,
   getProjectAncestors,
@@ -166,8 +167,12 @@ export function TodosSidebar({ onNavigate }: { onNavigate?: () => void }) {
     openProjectDialog,
   } = useTodos();
 
-  const [expanded, setExpanded] = useState(true);
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
+  const uiPrefs = useUiPrefs();
+  const expanded = uiPrefs.todosSectionExpanded ?? true;
+  const collapsedIds = useMemo(
+    () => new Set(uiPrefs.todosCollapsedIds ?? []),
+    [uiPrefs.todosCollapsedIds],
+  );
   const [userClosedOnPath, setUserClosedOnPath] = useState<{
     path: string;
     ids: Set<string>;
@@ -207,11 +212,11 @@ export function TodosSidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const handleToggleProjectBranch = (id: string) => {
     const nextCollapsed = !effectiveCollapsedIds.has(id);
-    setCollapsedIds((prev) => {
-      const next = new Set(prev);
+    updateUiPrefs((prev) => {
+      const next = new Set(prev.todosCollapsedIds ?? []);
       if (nextCollapsed) next.add(id);
       else next.delete(id);
-      return next;
+      return { ...prev, todosCollapsedIds: Array.from(next) };
     });
     setUserClosedOnPath((prev) => {
       const ids = new Set(prev.path === pathname ? prev.ids : []);
@@ -233,7 +238,12 @@ export function TodosSidebar({ onNavigate }: { onNavigate?: () => void }) {
           aria-label="Toggle Todos section"
           aria-expanded={expanded}
           aria-controls={listId}
-          onClick={() => setExpanded((prev) => !prev)}
+          onClick={() =>
+            updateUiPrefs((prev) => ({
+              ...prev,
+              todosSectionExpanded: !(prev.todosSectionExpanded ?? true),
+            }))
+          }
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
         >
           <Icon
@@ -271,7 +281,7 @@ export function TodosSidebar({ onNavigate }: { onNavigate?: () => void }) {
           aria-label="New project"
           title="New project"
           onClick={() => {
-            setExpanded(true);
+            updateUiPrefs((prev) => ({ ...prev, todosSectionExpanded: true }));
             onNavigate?.();
             openProjectDialog({ mode: "create" });
           }}

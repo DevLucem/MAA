@@ -23,6 +23,7 @@ import {
   type TodoViewLayout,
 } from "../../lib/todos-utils";
 import { useTodayIsoDate } from "../../lib/use-client-date";
+import { updateUiPrefs, useUiPrefs } from "../../lib/ui-prefs";
 import { TodoMonthBoard, TodoMonthList } from "./TodoMonthViews";
 import {
   buildSubtasksMap,
@@ -70,21 +71,23 @@ function formatWeekRangeLabel(startIso: string, endIso: string): string {
   return `${SHORT_MONTHS[s.month - 1]} ${s.day}, ${s.year} – ${SHORT_MONTHS[e.month - 1]} ${e.day}, ${e.year}`;
 }
 
+const DEFAULT_TODOS_LAYOUTS: Record<TodosRangeTab, TodoViewLayout> = {
+  day: "list",
+  week: "board",
+  month: "board",
+};
+
 /** Main Todos page (/todos) with full-width Day, Week, and Month tabs plus List/Board switcher. */
 export function TodosTodayView() {
   const todayIso = useTodayIsoDate() ?? "";
   const { hydrated, tasks, activeTasks } = useTodos();
+  const uiPrefs = useUiPrefs();
 
   const baseId = useId();
-  const [activeTab, setActiveTab] = useState<TodosRangeTab>("day");
+  const activeTab: TodosRangeTab = uiPrefs.todosActiveTab ?? "day";
   const [cursorIso, setCursorIso] = useState<string | null>(null);
-  const [layoutsByTab, setLayoutsByTab] = useState<
-    Record<TodosRangeTab, TodoViewLayout>
-  >({
-    day: "list",
-    week: "board",
-    month: "board",
-  });
+  const layoutsByTab: Record<TodosRangeTab, TodoViewLayout> =
+    uiPrefs.todosLayoutsByTab ?? DEFAULT_TODOS_LAYOUTS;
   const [sortBy, setSortBy] = useState<TodoSortBy>("manual");
   const [showCompleted, setShowCompleted] = useState(false);
 
@@ -101,7 +104,7 @@ export function TodosTodayView() {
   const subtasksByParent = useMemo(() => buildSubtasksMap(tasks), [tasks]);
 
   const selectTab = useCallback((nextTab: TodosRangeTab) => {
-    setActiveTab(nextTab);
+    updateUiPrefs((prev) => ({ ...prev, todosActiveTab: nextTab }));
     requestAnimationFrame(() => {
       tabRefs.current[nextTab]?.scrollIntoView({
         block: "nearest",
@@ -277,7 +280,13 @@ export function TodosTodayView() {
 
   const activeLayout = layoutsByTab[activeTab];
   const setActiveLayout = (next: TodoViewLayout) =>
-    setLayoutsByTab((prev) => ({ ...prev, [activeTab]: next }));
+    updateUiPrefs((prev) => ({
+      ...prev,
+      todosLayoutsByTab: {
+        ...(prev.todosLayoutsByTab ?? DEFAULT_TODOS_LAYOUTS),
+        [activeTab]: next,
+      },
+    }));
 
   const dayCombinedBoardTasks = isViewingToday
     ? [...overdueTasks, ...dayOpenTasks]

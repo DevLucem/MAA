@@ -1,0 +1,33 @@
+{
+  "format": "maa-workspace",
+  "schemaVersion": 3,
+  "updatedAt": "2026-11-22T00:00:00.000Z",
+  "docs": [],
+  "databases": [],
+  "finance": {
+    "accounts": [],
+    "transactions": [],
+    "recurring": [],
+    "lastCurrency": "USD",
+    "includeSubAccounts": true
+  },
+  "todos": {
+    "projects": [],
+    "sections": [],
+    "labels": [],
+    "tasks": []
+  },
+  "agent": {
+    "config": {
+      "baseUrl": "http://127.0.0.1:8642",
+      "apiKey": "",
+      "routingMode": "proxy",
+      "endpointMode": "chat",
+      "model": "hermes-agent",
+      "stream": true,
+      "systemPrompt": "You are Hermes, an autonomous AI agent integrated into the MAA workspace. Help the user with their documents, tasks, finances, and technical workflows concisely and accurately.",
+      "includeWorkspaceContext": true
+    },
+    "sessions": []
+  }
+}

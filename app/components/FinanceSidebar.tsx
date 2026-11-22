@@ -11,6 +11,7 @@ import {
   type FinanceAccount,
   getAccountAncestors,
 } from "../lib/finance-utils";
+import { updateUiPrefs, useUiPrefs } from "../lib/ui-prefs";
 
 function getRowIndent(level: number): string {
   return `${1 + level * 0.75}rem`;
@@ -145,8 +146,12 @@ export function FinanceSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { accounts, transactions, createAccount, openTransactionDialog } =
     useFinance();
 
-  const [expanded, setExpanded] = useState(true);
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
+  const uiPrefs = useUiPrefs();
+  const expanded = uiPrefs.financeSectionExpanded ?? true;
+  const collapsedIds = useMemo(
+    () => new Set(uiPrefs.financeCollapsedIds ?? []),
+    [uiPrefs.financeCollapsedIds],
+  );
   const [userClosedOnPath, setUserClosedOnPath] = useState<{
     path: string;
     ids: Set<string>;
@@ -189,11 +194,11 @@ export function FinanceSidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const handleToggle = (id: string) => {
     const nextCollapsed = !effectiveCollapsedIds.has(id);
-    setCollapsedIds((prev) => {
-      const next = new Set(prev);
+    updateUiPrefs((prev) => {
+      const next = new Set(prev.financeCollapsedIds ?? []);
       if (nextCollapsed) next.add(id);
       else next.delete(id);
-      return next;
+      return { ...prev, financeCollapsedIds: Array.from(next) };
     });
     setUserClosedOnPath((prev) => {
       const ids = new Set(prev.path === pathname ? prev.ids : []);
@@ -205,7 +210,7 @@ export function FinanceSidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const handleCreate = () => {
     const account = createAccount();
-    setExpanded(true);
+    updateUiPrefs((prev) => ({ ...prev, financeSectionExpanded: true }));
     onNavigate?.();
     router.push(`/finance/${encodeURIComponent(account.id)}`);
   };
@@ -227,7 +232,12 @@ export function FinanceSidebar({ onNavigate }: { onNavigate?: () => void }) {
           aria-label="Toggle Finance accounts"
           aria-expanded={expanded}
           aria-controls={listId}
-          onClick={() => setExpanded((prev) => !prev)}
+          onClick={() =>
+            updateUiPrefs((prev) => ({
+              ...prev,
+              financeSectionExpanded: !(prev.financeSectionExpanded ?? true),
+            }))
+          }
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
         >
           <Icon

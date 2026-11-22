@@ -13,6 +13,7 @@ import { Icon } from "../assets/icons";
 import type { InlineDatabase } from "../lib/database-types";
 import { useDocs } from "../lib/docs-store";
 import { type Doc, getDocAncestors } from "../lib/docs-utils";
+import { updateUiPrefs, useUiPrefs } from "../lib/ui-prefs";
 import { DocTreeNode } from "./sidebar/DocTreeNode";
 import { useSidebarDocDrag } from "./sidebar/useSidebarDocDrag";
 
@@ -67,9 +68,16 @@ export function DocsSidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const navRef = useRef<HTMLElement>(null);
 
-  const [expanded, setExpanded] = useState(true);
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
-  const [expandedDbIds, setExpandedDbIds] = useState<Set<string>>(() => new Set());
+  const uiPrefs = useUiPrefs();
+  const expanded = uiPrefs.docsSectionExpanded ?? true;
+  const collapsedIds = useMemo(
+    () => new Set(uiPrefs.docsCollapsedIds ?? []),
+    [uiPrefs.docsCollapsedIds],
+  );
+  const expandedDbIds = useMemo(
+    () => new Set(uiPrefs.docsExpandedDbIds ?? []),
+    [uiPrefs.docsExpandedDbIds],
+  );
   const [userClosedOnPath, setUserClosedOnPath] = useState<{
     path: string;
     ids: Set<string>;
@@ -90,11 +98,13 @@ export function DocsSidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const expandDoc = useCallback(
     (docId: string) => {
-      setCollapsedIds((prev) => {
-        if (!prev.has(docId)) return prev;
-        const next = new Set(prev);
-        next.delete(docId);
-        return next;
+      updateUiPrefs((prev) => {
+        const list = prev.docsCollapsedIds ?? [];
+        if (!list.includes(docId)) return prev;
+        return {
+          ...prev,
+          docsCollapsedIds: list.filter((item) => item !== docId),
+        };
       });
       setUserClosedOnPath((prev) => {
         if (prev.path !== pathname || !prev.ids.has(docId)) return prev;
@@ -213,7 +223,7 @@ export function DocsSidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const handleCreateDoc = (parentId?: string) => {
     const newDoc = createDoc(parentId);
-    setExpanded(true);
+    updateUiPrefs((prev) => ({ ...prev, docsSectionExpanded: true }));
     if (parentId) {
       expandDoc(parentId);
     }
@@ -224,7 +234,7 @@ export function DocsSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const handleCreateDbRow = (databaseId: string) => {
     const row = createDatabaseRow(databaseId);
     if (!row) return;
-    setExpanded(true);
+    updateUiPrefs((prev) => ({ ...prev, docsSectionExpanded: true }));
     onNavigate?.();
     router.push(`/docs/${row.id}`);
   };
@@ -265,20 +275,21 @@ export function DocsSidebar({ onNavigate }: { onNavigate?: () => void }) {
         dbsByParentDoc
       );
 
-      setCollapsedIds((prev) => {
-        const next = new Set(prev);
-        for (const docId of docIds) next.add(docId);
-        return next;
+      updateUiPrefs((prev) => {
+        const nextCollapsed = new Set(prev.docsCollapsedIds ?? []);
+        for (const docId of docIds) nextCollapsed.add(docId);
+        let nextExpandedDbs = prev.docsExpandedDbIds;
+        if (dbIds.length > 0 && nextExpandedDbs?.some((dbId) => dbIds.includes(dbId))) {
+          nextExpandedDbs = nextExpandedDbs.filter((dbId) => !dbIds.includes(dbId));
+        }
+        return {
+          ...prev,
+          docsCollapsedIds: Array.from(nextCollapsed),
+          ...(nextExpandedDbs !== prev.docsExpandedDbIds
+            ? { docsExpandedDbIds: nextExpandedDbs }
+            : {}),
+        };
       });
-
-      if (dbIds.length > 0) {
-        setExpandedDbIds((prev) => {
-          if (!dbIds.some((dbId) => prev.has(dbId))) return prev;
-          const next = new Set(prev);
-          for (const dbId of dbIds) next.delete(dbId);
-          return next;
-        });
-      }
 
       setUserClosedOnPath((prev) => {
         const nextIds = new Set(prev.path === pathname ? prev.ids : []);
@@ -289,11 +300,13 @@ export function DocsSidebar({ onNavigate }: { onNavigate?: () => void }) {
       return;
     }
 
-    setCollapsedIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
+    updateUiPrefs((prev) => {
+      const list = prev.docsCollapsedIds ?? [];
+      if (!list.includes(id)) return prev;
+      return {
+        ...prev,
+        docsCollapsedIds: list.filter((docId) => docId !== id),
+      };
     });
     setUserClosedOnPath((prev) => {
       if (prev.path !== pathname || !prev.ids.has(id)) return prev;
@@ -306,14 +319,14 @@ export function DocsSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const handleToggleDbBranch = (dbId: string) => {
     const currentlyExpanded = effectiveExpandedDbIds.has(dbId);
     const nextExpanded = !currentlyExpanded;
-    setExpandedDbIds((prev) => {
-      const next = new Set(prev);
+    updateUiPrefs((prev) => {
+      const next = new Set(prev.docsExpandedDbIds ?? []);
       if (nextExpanded) {
         next.add(dbId);
       } else {
         next.delete(dbId);
       }
-      return next;
+      return { ...prev, docsExpandedDbIds: Array.from(next) };
     });
     setUserClosedOnPath((prev) => {
       const nextIds = new Set(prev.path === pathname ? prev.ids : []);
@@ -349,7 +362,12 @@ export function DocsSidebar({ onNavigate }: { onNavigate?: () => void }) {
           aria-label="Toggle Docs list"
           aria-expanded={expanded}
           aria-controls={docsListId}
-          onClick={() => setExpanded((prev) => !prev)}
+          onClick={() =>
+            updateUiPrefs((prev) => ({
+              ...prev,
+              docsSectionExpanded: !(prev.docsSectionExpanded ?? true),
+            }))
+          }
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
         >
           <Icon

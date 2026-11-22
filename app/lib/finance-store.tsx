@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -24,19 +25,16 @@ import {
   listDueOccurrences,
   markOccurrenceHandled,
   recurringTransactionId,
-  normalizeRecurringRule,
   normalizeTags,
   type RecurringInput,
   type RecurringRule,
   DEFAULT_CURRENCY,
   type FinanceAccount,
-  FINANCE_STORAGE_KEY,
   type FinanceTransaction,
-  normalizeAccount,
   normalizeCurrency,
-  normalizeTransaction,
   type TransactionInput,
 } from "./finance-utils";
+import { useWorkspaceServer } from "./workspace-server-store";
 
 type AccountPatch = Partial<Pick<FinanceAccount, "name" | "icon">>;
 
@@ -47,6 +45,7 @@ export type TransactionDialogRequest =
 
 interface FinanceContextValue {
   hydrated: boolean;
+  hydratedRevision: number;
   /** Active accounts (not trashed and not inside a trashed account). */
   accounts: FinanceAccount[];
   /** Transactions belonging to active accounts. */
@@ -110,19 +109,12 @@ interface FinanceContextValue {
   };
 }
 
-interface StoredFinance {
-  version: 1;
-  accounts: FinanceAccount[];
-  transactions: FinanceTransaction[];
-  lastCurrency?: string;
-  includeSubAccounts?: boolean;
-  recurring?: RecurringRule[];
-}
-
 const FinanceContext = createContext<FinanceContextValue | null>(null);
 
-/** Provides finance accounts and transactions persisted to localStorage. */
+/** Provides finance accounts and transactions synchronized with the server workspace store. */
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
+  const { loaded, loadRevision, initialState } = useWorkspaceServer();
+
   const [allAccounts, setAllAccounts] = useState<FinanceAccount[]>([]);
   const [allTransactions, setAllTransactions] = useState<FinanceTransaction[]>([]);
   const [allRecurring, setAllRecurring] = useState<RecurringRule[]>([]);
@@ -130,77 +122,26 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [nowMs, setNowMs] = useState(0);
   const [lastCurrency, setLastCurrency] = useState(DEFAULT_CURRENCY);
   const [includeSubAccounts, setIncludeSubAccounts] = useState(true);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedRevision, setHydratedRevision] = useState(0);
   const [transactionDialog, setTransactionDialog] =
     useState<TransactionDialogRequest | null>(null);
+  const lastAppliedRevisionRef = useRef(0);
+
+  const hydrated = hydratedRevision > 0;
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(FINANCE_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<StoredFinance>;
-        const loadedAccounts = Array.isArray(parsed.accounts)
-          ? parsed.accounts
-              .map(normalizeAccount)
-              .filter((a): a is FinanceAccount => a !== null)
-          : [];
-        const accountIds = new Set(loadedAccounts.map((a) => a.id));
-        const loadedTx = Array.isArray(parsed.transactions)
-          ? parsed.transactions
-              .map(normalizeTransaction)
-              .filter(
-                (t): t is FinanceTransaction =>
-                  t !== null && accountIds.has(t.accountId)
-              )
-          : [];
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setAllAccounts(loadedAccounts);
-        setAllTransactions(loadedTx);
-        setLastCurrency(
-          normalizeCurrency(parsed.lastCurrency) ?? DEFAULT_CURRENCY
-        );
-        setIncludeSubAccounts(parsed.includeSubAccounts !== false);
-        setAllRecurring(
-          Array.isArray(parsed.recurring)
-            ? parsed.recurring
-                .map(normalizeRecurringRule)
-                .filter(
-                  (r): r is RecurringRule =>
-                    r !== null && accountIds.has(r.accountId)
-                )
-            : []
-        );
-      }
-    } catch {
-      // Ignore malformed stored JSON
-    } finally {
-      setHydrated(true);
-    }
-  }, []);
+    if (!loaded || loadRevision === 0) return;
+    if (lastAppliedRevisionRef.current === loadRevision) return;
+    lastAppliedRevisionRef.current = loadRevision;
 
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      const payload: StoredFinance = {
-        version: 1,
-        accounts: allAccounts,
-        transactions: allTransactions,
-        lastCurrency,
-        includeSubAccounts,
-        recurring: allRecurring,
-      };
-      localStorage.setItem(FINANCE_STORAGE_KEY, JSON.stringify(payload));
-    } catch {
-      // Ignore quota or storage restriction errors
-    }
-  }, [
-    allAccounts,
-    allTransactions,
-    allRecurring,
-    lastCurrency,
-    includeSubAccounts,
-    hydrated,
-  ]);
+    const fin = initialState.finance;
+    setAllAccounts(fin.accounts);
+    setAllTransactions(fin.transactions);
+    setAllRecurring(fin.recurring);
+    setLastCurrency(normalizeCurrency(fin.lastCurrency) ?? DEFAULT_CURRENCY);
+    setIncludeSubAccounts(fin.includeSubAccounts !== false);
+    setHydratedRevision(loadRevision);
+  }, [initialState, loadRevision, loaded]);
 
   const allById = useMemo(
     () => new Map(allAccounts.map((a) => [a.id, a])),
@@ -599,20 +540,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         mode
       );
 
-      try {
-        const payload: StoredFinance = {
-          version: 1,
-          accounts: next.accounts,
-          transactions: next.transactions,
-          lastCurrency: next.lastCurrency,
-          includeSubAccounts: next.includeSubAccounts,
-          recurring: next.recurring,
-        };
-        localStorage.setItem(FINANCE_STORAGE_KEY, JSON.stringify(payload));
-      } catch {
-        // Ignore quota or storage restriction errors
-      }
-
       setAllAccounts(next.accounts);
       setAllTransactions(next.transactions);
       setAllRecurring(next.recurring);
@@ -631,6 +558,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<FinanceContextValue>(
     () => ({
       hydrated,
+      hydratedRevision,
       accounts,
       transactions,
       trashedAccounts,
@@ -666,6 +594,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       hydrated,
+      hydratedRevision,
       accounts,
       transactions,
       trashedAccounts,

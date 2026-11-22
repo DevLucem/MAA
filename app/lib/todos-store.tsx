@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { NotionColor } from "./database-types";
@@ -21,24 +22,20 @@ import {
   computeNextRecurrenceDate,
   isOverdue,
   normalizeDueTime,
-  normalizeLabel,
   normalizeLabelName,
   normalizePlainDateIso,
-  normalizeProject,
-  normalizeSection,
-  normalizeTask,
   repairProjectHierarchy,
   type TodoComment,
   type TodoLabel,
   type TodoPriority,
   type TodoProject,
   type TodoRecurrence,
-  TODOS_STORAGE_KEY,
   type TodoSection,
   type TodoTask,
   type TodoViewLayout,
 } from "./todos-utils";
 import { useTodayIsoDate } from "./use-client-date";
+import { useWorkspaceServer } from "./workspace-server-store";
 
 export interface CreateTaskInput {
   title: string;
@@ -105,16 +102,9 @@ export interface TodoToast {
   onUndo?: () => void;
 }
 
-interface StoredTodos {
-  version: 1;
-  projects: TodoProject[];
-  sections: TodoSection[];
-  labels: TodoLabel[];
-  tasks: TodoTask[];
-}
-
 interface TodosContextValue {
   hydrated: boolean;
+  hydratedRevision: number;
   projects: TodoProject[];
   trashedProjects: TodoProject[];
   sections: TodoSection[];
@@ -209,15 +199,19 @@ function collectTaskSubtree(tasks: TodoTask[], rootId: string): Set<string> {
   return result;
 }
 
-/** Provides Todoist-style projects, sections, labels, and tasks persisted to localStorage. */
+/** Provides Todoist-style projects, sections, labels, and tasks synchronized with the server workspace store. */
 export function TodosProvider({ children }: { children: React.ReactNode }) {
+  const { loaded, loadRevision, initialState } = useWorkspaceServer();
   const todayIso = useTodayIsoDate() ?? "";
 
   const [allProjects, setAllProjects] = useState<TodoProject[]>([]);
   const [allSections, setAllSections] = useState<TodoSection[]>([]);
   const [allLabels, setAllLabels] = useState<TodoLabel[]>([]);
   const [allTasks, setAllTasks] = useState<TodoTask[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedRevision, setHydratedRevision] = useState(0);
+  const lastAppliedRevisionRef = useRef(0);
+
+  const hydrated = hydratedRevision > 0;
 
   const [quickAddRequest, setQuickAddRequest] =
     useState<QuickAddRequest | null>(null);
@@ -229,84 +223,17 @@ export function TodosProvider({ children }: { children: React.ReactNode }) {
   const [toast, setToast] = useState<TodoToast | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(TODOS_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<StoredTodos>;
-        const loadedProjects = Array.isArray(parsed.projects)
-          ? repairProjectHierarchy(
-              parsed.projects
-                .map(normalizeProject)
-                .filter((p): p is TodoProject => p !== null)
-            )
-          : [];
-        const projectIds = new Set(loadedProjects.map((p) => p.id));
+    if (!loaded || loadRevision === 0) return;
+    if (lastAppliedRevisionRef.current === loadRevision) return;
+    lastAppliedRevisionRef.current = loadRevision;
 
-        const loadedSections = Array.isArray(parsed.sections)
-          ? parsed.sections
-              .map(normalizeSection)
-              .filter(
-                (s): s is TodoSection =>
-                  s !== null && projectIds.has(s.projectId)
-              )
-          : [];
-        const sectionById = new Map(loadedSections.map((s) => [s.id, s]));
-
-        const loadedLabels = Array.isArray(parsed.labels)
-          ? parsed.labels
-              .map(normalizeLabel)
-              .filter((l): l is TodoLabel => l !== null)
-          : [];
-
-        const loadedTasks = Array.isArray(parsed.tasks)
-          ? parsed.tasks
-              .map(normalizeTask)
-              .filter(
-                (t): t is TodoTask =>
-                  t !== null &&
-                  (t.projectId === null || projectIds.has(t.projectId))
-              )
-              .map((t) => {
-                if (t.sectionId) {
-                  const sec = sectionById.get(t.sectionId);
-                  if (!sec || sec.projectId !== t.projectId) {
-                    const next = { ...t };
-                    delete next.sectionId;
-                    return next;
-                  }
-                }
-                return t;
-              })
-          : [];
-
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setAllProjects(loadedProjects);
-        setAllSections(loadedSections);
-        setAllLabels(loadedLabels);
-        setAllTasks(loadedTasks);
-      }
-    } catch {
-      // Ignore malformed stored JSON
-    } finally {
-      setHydrated(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      const payload: StoredTodos = {
-        version: 1,
-        projects: allProjects,
-        sections: allSections,
-        labels: allLabels,
-        tasks: allTasks,
-      };
-      localStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(payload));
-    } catch {
-      // Ignore quota or storage restriction errors
-    }
-  }, [allLabels, allProjects, allSections, allTasks, hydrated]);
+    const todos = initialState.todos;
+    setAllProjects(todos.projects);
+    setAllSections(todos.sections);
+    setAllLabels(todos.labels);
+    setAllTasks(todos.tasks);
+    setHydratedRevision(loadRevision);
+  }, [initialState, loadRevision, loaded]);
 
   const allProjectsById = useMemo(
     () => new Map(allProjects.map((p) => [p.id, p])),
@@ -1226,16 +1153,6 @@ export function TodosProvider({ children }: { children: React.ReactNode }) {
         mode
       );
 
-      try {
-        const payload: StoredTodos = {
-          version: 1,
-          ...next,
-        };
-        localStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(payload));
-      } catch {
-        // Ignore quota or storage errors
-      }
-
       setAllProjects(next.projects);
       setAllSections(next.sections);
       setAllLabels(next.labels);
@@ -1253,6 +1170,7 @@ export function TodosProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<TodosContextValue>(
     () => ({
       hydrated,
+      hydratedRevision,
       projects,
       trashedProjects,
       sections,
@@ -1303,6 +1221,7 @@ export function TodosProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       hydrated,
+      hydratedRevision,
       projects,
       trashedProjects,
       sections,
