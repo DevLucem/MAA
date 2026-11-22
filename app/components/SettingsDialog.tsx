@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type ChangeEvent, type DragEvent, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../assets/icons";
+import { type SettingsSectionId, useAgent } from "../lib/agent-store";
 import { useDocs } from "../lib/docs-store";
 import {
   buildExportFilename,
@@ -10,36 +11,86 @@ import {
   type ParsedImportResult,
   parseWorkspaceImport,
   serializeWorkspaceExport,
+  type ThemePreference,
 } from "../lib/docs-transfer";
 import { useFinance } from "../lib/finance-store";
+import { collectAccountSubtree } from "../lib/finance-utils";
+import { AgentSettingsPanel } from "./AgentSettingsPanel";
 import { TrashSettingsPanel } from "./TrashSettingsPanel";
 
-const SETTINGS_SECTIONS = [
-  { id: "data", label: "Import & Export", icon: "database" as const },
-  { id: "trash", label: "Trash", icon: "trash" as const },
+const SETTINGS_SECTIONS: ReadonlyArray<{
+  id: SettingsSectionId;
+  label: string;
+  icon: "bot" | "database" | "trash";
+}> = [
+  { id: "agent", label: "Agent", icon: "bot" },
+  { id: "data", label: "Import & Export", icon: "database" },
+  { id: "trash", label: "Trash", icon: "trash" },
 ] as const;
 
-type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
+type ThemeMode = ThemePreference;
 
-interface SettingsDialogProps {
-  open: boolean;
-  onClose: () => void;
+function applyColorSchemeMeta(mode: ThemeMode) {
+  if (typeof document === "undefined") return;
+  if (mode === "light" || mode === "dark") {
+    document.documentElement.dataset.theme = mode;
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+
+  const targetContent = mode === "system" ? "light dark" : mode;
+  const metas = document.querySelectorAll<HTMLMetaElement>(
+    'meta[name="color-scheme"]'
+  );
+  if (metas.length === 0) {
+    const meta = document.createElement("meta");
+    meta.name = "color-scheme";
+    meta.content = targetContent;
+    document.head.appendChild(meta);
+    return;
+  }
+  metas.forEach((meta) => {
+    if (meta.content !== targetContent) {
+      meta.content = targetContent;
+    }
+  });
 }
 
-/** Extensible workspace Settings modal using native <dialog> with JSON export and import. */
-export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
+/** Extensible workspace Settings modal using native <dialog> with Agent, JSON export/import, and Trash sections. */
+export function SettingsDialog({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const titleId = useId();
   const baseId = useId();
   const fileInputId = useId();
   const router = useRouter();
-  const { docs, databases, trashedDocs, importWorkspace } = useDocs();
-  const { trashedAccounts } = useFinance();
+  const {
+    settingsSection: activeSection,
+    setSettingsSection: setActiveSection,
+    config: agentConfig,
+    sessions: agentSessions,
+    importAgent,
+  } = useAgent();
+  const {
+    docs,
+    databases,
+    trashedDocs,
+    trashedDatabases,
+    importWorkspace,
+  } = useDocs();
+  const { trashedAccounts, getExportSnapshot, importFinance } = useFinance();
   const trashCount = trashedDocs.length + trashedAccounts.length;
+  const financeSnapshot = getExportSnapshot();
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>("data");
+  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
+  const [systemIsDark, setSystemIsDark] = useState(false);
   const [stagedImport, setStagedImport] = useState<ParsedImportResult | null>(
     null
   );
@@ -50,13 +101,78 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [isDragOver, setIsDragOver] = useState(false);
 
   const resetTransientState = () => {
-    setActiveSection("data");
     setStagedImport(null);
     setStagedFileName("");
     setImportMode("merge");
     setImportError(null);
     setFeedback(null);
     setIsDragOver(false);
+  };
+
+  useEffect(() => {
+    const readStoredTheme = (): ThemeMode => {
+      try {
+        const stored = localStorage.getItem("color-scheme");
+        if (stored === "light" || stored === "dark") return stored;
+      } catch {
+        // Ignore storage errors
+      }
+      return "system";
+    };
+
+    const initial = readStoredTheme();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setThemeMode(initial);
+    applyColorSchemeMeta(initial);
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemIsDark(mediaQuery.matches);
+
+    const handleMediaChange = (event: MediaQueryListEvent) => {
+      setSystemIsDark(event.matches);
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "color-scheme" || event.key === null) {
+        const next = readStoredTheme();
+        setThemeMode(next);
+        applyColorSchemeMeta(next);
+      }
+    };
+
+    mediaQuery.addEventListener("change", handleMediaChange);
+    window.addEventListener("storage", handleStorage);
+
+    // Keep <meta name="color-scheme"> in sync when Next.js reconciles <head> on route transitions.
+    const headObserver = new MutationObserver(() => {
+      applyColorSchemeMeta(readStoredTheme());
+    });
+    headObserver.observe(document.head, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["content"],
+    });
+
+    return () => {
+      mediaQuery.removeEventListener("change", handleMediaChange);
+      window.removeEventListener("storage", handleStorage);
+      headObserver.disconnect();
+    };
+  }, []);
+
+  const handleSelectTheme = (next: ThemeMode) => {
+    setThemeMode(next);
+    applyColorSchemeMeta(next);
+    try {
+      if (next === "system") {
+        localStorage.removeItem("color-scheme");
+      } else {
+        localStorage.setItem("color-scheme", next);
+      }
+    } catch {
+      // Ignore storage restriction errors
+    }
   };
 
   useEffect(() => {
@@ -114,7 +230,19 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   };
 
   const handleExportJson = () => {
-    const json = serializeWorkspaceExport(docs, databases);
+    const allExportDocs = [...docs, ...trashedDocs];
+    const allExportDbs = [...databases, ...trashedDatabases];
+    const currentFinance = getExportSnapshot();
+    const json = serializeWorkspaceExport({
+      docs: allExportDocs,
+      databases: allExportDbs,
+      finance: currentFinance,
+      agent: {
+        config: agentConfig,
+        sessions: agentSessions,
+      },
+      theme: themeMode,
+    });
     const filename = buildExportFilename();
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -129,7 +257,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
     setImportError(null);
     setFeedback(
-      `Downloaded ${filename} (${docs.length} ${docs.length === 1 ? "doc" : "docs"}, ${databases.length} ${databases.length === 1 ? "database" : "databases"}).`
+      `Downloaded ${filename} (${allExportDocs.length} ${allExportDocs.length === 1 ? "doc" : "docs"}, ${allExportDbs.length} ${allExportDbs.length === 1 ? "database" : "databases"}, ${currentFinance.accounts.length} finance ${currentFinance.accounts.length === 1 ? "account" : "accounts"}, ${currentFinance.transactions.length} ${currentFinance.transactions.length === 1 ? "transaction" : "transactions"}, ${agentSessions.length} agent ${agentSessions.length === 1 ? "session" : "sessions"}, settings & theme).`
     );
   };
 
@@ -174,7 +302,39 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const handleApplyImport = () => {
     if (!stagedImport) return;
     const { bundle } = stagedImport;
-    const result = importWorkspace(bundle, importMode);
+    const docsResult = importWorkspace(bundle, importMode);
+
+    const summaryParts: string[] = [
+      `${docsResult.docsCount} ${docsResult.docsCount === 1 ? "document" : "documents"}`,
+      `${docsResult.databasesCount} ${docsResult.databasesCount === 1 ? "database" : "databases"}`,
+    ];
+
+    if (bundle.finance) {
+      const finResult = importFinance(bundle.finance, importMode);
+      summaryParts.push(
+        `${finResult.accountsCount} finance ${finResult.accountsCount === 1 ? "account" : "accounts"}`,
+        `${finResult.transactionsCount} ${finResult.transactionsCount === 1 ? "transaction" : "transactions"}`
+      );
+      if (finResult.recurringCount > 0) {
+        summaryParts.push(
+          `${finResult.recurringCount} recurring ${finResult.recurringCount === 1 ? "rule" : "rules"}`
+        );
+      }
+    }
+
+    if (bundle.agent) {
+      const agentResult = importAgent(bundle.agent, importMode);
+      summaryParts.push(
+        `${agentResult.sessionsCount} agent ${agentResult.sessionsCount === 1 ? "session" : "sessions"}${
+          agentResult.configUpdated ? " & Agent config" : ""
+        }`
+      );
+    }
+
+    if (importMode === "replace" && bundle.theme) {
+      handleSelectTheme(bundle.theme);
+      summaryParts.push(`theme (${bundle.theme})`);
+    }
 
     if (importMode === "replace") {
       const currentPath = window.location.pathname;
@@ -182,26 +342,50 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         const currentDbId = decodeURIComponent(
           currentPath.slice("/docs/db/".length).split("/")[0] ?? ""
         );
-        if (!bundle.databases.some((db) => db.id === currentDbId)) {
+        if (
+          !bundle.databases.some((db) => !db.trashedAt && db.id === currentDbId)
+        ) {
           router.replace("/docs");
         }
       } else if (currentPath.startsWith("/docs/")) {
         const currentDocId = decodeURIComponent(
           currentPath.slice("/docs/".length).split("/")[0] ?? ""
         );
-        if (!bundle.docs.some((doc) => doc.id === currentDocId)) {
+        if (
+          !bundle.docs.some((doc) => !doc.trashedAt && doc.id === currentDocId)
+        ) {
           router.replace("/docs");
+        }
+      } else if (currentPath.startsWith("/finance/") && bundle.finance) {
+        const currentAccountId = decodeURIComponent(
+          currentPath.slice("/finance/".length).split("/")[0] ?? ""
+        );
+        const hiddenFinanceIds = new Set<string>();
+        for (const acc of bundle.finance.accounts) {
+          if (acc.trashedAt) {
+            for (const id of collectAccountSubtree(
+              bundle.finance.accounts,
+              acc.id
+            )) {
+              hiddenFinanceIds.add(id);
+            }
+          }
+        }
+        const hasActiveAccount = bundle.finance.accounts.some(
+          (a) => a.id === currentAccountId && !hiddenFinanceIds.has(a.id)
+        );
+        if (!hasActiveAccount) {
+          router.replace("/finance");
         }
       }
     }
 
-    const actionWord = importMode === "replace" ? "Replaced workspace with" : "Imported";
+    const actionWord =
+      importMode === "replace" ? "Replaced workspace with" : "Imported";
     setStagedImport(null);
     setStagedFileName("");
     setImportError(null);
-    setFeedback(
-      `${actionWord} ${result.docsCount} ${result.docsCount === 1 ? "document" : "documents"} and ${result.databasesCount} ${result.databasesCount === 1 ? "database" : "databases"}.`
-    );
+    setFeedback(`${actionWord} ${summaryParts.join(", ")}.`);
   };
 
   const currentSectionMeta =
@@ -260,11 +444,61 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             </div>
           </div>
 
-          <p className="hidden px-2 pt-3 text-xs text-muted sm:block">
-            {docs.length} {docs.length === 1 ? "doc" : "docs"} ·{" "}
-            {databases.length}{" "}
-            {databases.length === 1 ? "database" : "databases"}
-          </p>
+          <div className="space-y-2.5 pt-3">
+            <div
+              role="group"
+              aria-label="Theme preference"
+              className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-surface/80 p-1"
+            >
+              {(
+                [
+                  {
+                    id: "light" as const,
+                    label: "Light theme",
+                    title: "Light",
+                    icon: "sun" as const,
+                  },
+                  {
+                    id: "system" as const,
+                    label: `System theme (Currently ${systemIsDark ? "dark" : "light"})`,
+                    title: `System (Currently ${systemIsDark ? "dark" : "light"})`,
+                    icon: "monitor" as const,
+                  },
+                  {
+                    id: "dark" as const,
+                    label: "Dark theme",
+                    title: "Dark",
+                    icon: "moon" as const,
+                  },
+                ] as const
+              ).map((option) => {
+                const isSelected = themeMode === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-label={option.label}
+                    aria-pressed={isSelected}
+                    title={option.title}
+                    onClick={() => handleSelectTheme(option.id)}
+                    className={`inline-flex h-7 items-center justify-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
+                      isSelected
+                        ? "bg-secondary text-foreground shadow-2xs"
+                        : "text-muted hover:bg-secondary/60 hover:text-foreground"
+                    }`}
+                  >
+                    <Icon name={option.icon} className="size-3.5" />
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="hidden px-2 text-xs text-muted sm:block">
+              {docs.length} {docs.length === 1 ? "doc" : "docs"} ·{" "}
+              {databases.length}{" "}
+              {databases.length === 1 ? "database" : "databases"}
+            </p>
+          </div>
         </div>
 
         {/* Right Content Pane */}
@@ -299,7 +533,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               </div>
             )}
 
-            {activeSection === "trash" ? (
+            {activeSection === "agent" ? (
+              <AgentSettingsPanel onFeedback={(msg) => setFeedback(msg)} />
+            ) : activeSection === "trash" ? (
               <TrashSettingsPanel onFeedback={(msg) => setFeedback(msg)} />
             ) : (
               <>
@@ -311,11 +547,27 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     Export workspace
                   </h3>
                   <p className="text-xs text-muted">
-                    Download a JSON backup of all documents, nested subpages,
-                    inline databases, views, and properties ({docs.length}{" "}
-                    {docs.length === 1 ? "document" : "documents"},{" "}
-                    {databases.length}{" "}
-                    {databases.length === 1 ? "database" : "databases"}).
+                    Download a full JSON backup of all documents &amp; databases
+                    (including Trash), Finance accounts, transactions &amp;
+                    recurring rules, Agent settings &amp; chat sessions, and
+                    theme preference ({docs.length + trashedDocs.length}{" "}
+                    {docs.length + trashedDocs.length === 1
+                      ? "doc"
+                      : "docs"}
+                    , {databases.length + trashedDatabases.length}{" "}
+                    {databases.length + trashedDatabases.length === 1
+                      ? "database"
+                      : "databases"}
+                    , {financeSnapshot.accounts.length} finance{" "}
+                    {financeSnapshot.accounts.length === 1
+                      ? "account"
+                      : "accounts"}
+                    , {financeSnapshot.transactions.length}{" "}
+                    {financeSnapshot.transactions.length === 1
+                      ? "transaction"
+                      : "transactions"}
+                    , {agentSessions.length} agent{" "}
+                    {agentSessions.length === 1 ? "session" : "sessions"}).
                   </p>
                 </div>
 
@@ -337,8 +589,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   Import workspace
                 </h3>
                 <p className="text-xs text-muted">
-                  Upload an MAA workspace <code>.json</code> export to add
-                  copied pages or restore a saved backup.
+                  Upload an MAA workspace <code>.json</code> backup to merge
+                  pages, finance &amp; chat history or restore your full
+                  workspace.
                 </p>
               </div>
 
@@ -397,11 +650,43 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                         Ready to import {stagedImport.docCount}{" "}
                         {stagedImport.docCount === 1
                           ? "document"
-                          : "documents"}{" "}
-                        and {stagedImport.databaseCount}{" "}
+                          : "documents"}
+                        {stagedImport.trashedDocCount > 0
+                          ? ` (${stagedImport.trashedDocCount} in trash)`
+                          : ""}
+                        , {stagedImport.databaseCount}{" "}
                         {stagedImport.databaseCount === 1
                           ? "database"
                           : "databases"}
+                        {stagedImport.hasFinance
+                          ? `, ${stagedImport.financeAccountCount} finance ${
+                              stagedImport.financeAccountCount === 1
+                                ? "account"
+                                : "accounts"
+                            }${
+                              stagedImport.financeTrashedAccountCount > 0
+                                ? ` (${stagedImport.financeTrashedAccountCount} in trash)`
+                                : ""
+                            }, ${stagedImport.financeTransactionCount} ${
+                              stagedImport.financeTransactionCount === 1
+                                ? "transaction"
+                                : "transactions"
+                            }, ${stagedImport.financeRecurringCount} recurring ${
+                              stagedImport.financeRecurringCount === 1
+                                ? "rule"
+                                : "rules"
+                            }`
+                          : ""}
+                        {stagedImport.hasAgent
+                          ? `, ${stagedImport.agentSessionCount} agent ${
+                              stagedImport.agentSessionCount === 1
+                                ? "session"
+                                : "sessions"
+                            } & Hermes config`
+                          : ""}
+                        {stagedImport.hasTheme && stagedImport.bundle.theme
+                          ? `, theme (${stagedImport.bundle.theme})`
+                          : ""}
                         .
                       </p>
                     </div>
@@ -432,8 +717,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           Merge (add as copy)
                         </span>
                         <span className="block text-muted">
-                          Keeps existing data untouched and assigns new IDs to
-                          imported pages and databases.
+                          Keeps existing data, Agent config, and theme untouched;
+                          assigns new IDs to imported pages, databases, finance
+                          items, and chat sessions.
                         </span>
                       </span>
                     </label>
@@ -452,8 +738,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           Replace workspace
                         </span>
                         <span className="block text-muted">
-                          Replaces all current documents and databases with the
-                          contents of this file.
+                          Replaces all current workspace data (documents,
+                          databases, Trash, Finance, Agent config &amp;
+                          sessions, and theme) with the contents of this file.
                         </span>
                       </span>
                     </label>

@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import boardSvg from "./board.svg";
+import botSvg from "./bot.svg";
 import calendarSvg from "./calendar.svg";
 import chevronRightSvg from "./chevron-right.svg";
 import copySvg from "./copy.svg";
@@ -18,15 +19,21 @@ import lockSvg from "./lock.svg";
 import maximizeSvg from "./maximize.svg";
 import menuSvg from "./menu.svg";
 import minimizeSvg from "./minimize.svg";
+import monitorSvg from "./monitor.svg";
+import moonSvg from "./moon.svg";
+import panelRightSvg from "./panel-right.svg";
 import plusSvg from "./plus.svg";
 import restoreSvg from "./restore.svg";
 import searchSvg from "./search.svg";
+import sendSvg from "./send.svg";
 import settingsSvg from "./settings.svg";
 import shareSvg from "./share.svg";
 import smileSvg from "./smile.svg";
 import sortSvg from "./sort.svg";
 import starSolidSvg from "./star-solid.svg";
 import starSvg from "./star.svg";
+import stopSvg from "./stop.svg";
+import sunSvg from "./sun.svg";
 import syncSvg from "./sync.svg";
 import tableSvg from "./table.svg";
 import timelineSvg from "./timeline.svg";
@@ -42,6 +49,7 @@ function assetUrl(asset: string | { src: string }): string {
 
 const ICONS = {
   board: assetUrl(boardSvg),
+  bot: assetUrl(botSvg),
   calendar: assetUrl(calendarSvg),
   "chevron-right": assetUrl(chevronRightSvg),
   copy: assetUrl(copySvg),
@@ -60,15 +68,21 @@ const ICONS = {
   maximize: assetUrl(maximizeSvg),
   menu: assetUrl(menuSvg),
   minimize: assetUrl(minimizeSvg),
+  monitor: assetUrl(monitorSvg),
+  moon: assetUrl(moonSvg),
+  "panel-right": assetUrl(panelRightSvg),
   plus: assetUrl(plusSvg),
   restore: assetUrl(restoreSvg),
   search: assetUrl(searchSvg),
+  send: assetUrl(sendSvg),
   settings: assetUrl(settingsSvg),
   share: assetUrl(shareSvg),
   smile: assetUrl(smileSvg),
   sort: assetUrl(sortSvg),
   star: assetUrl(starSvg),
   "star-solid": assetUrl(starSolidSvg),
+  stop: assetUrl(stopSvg),
+  sun: assetUrl(sunSvg),
   sync: assetUrl(syncSvg),
   table: assetUrl(tableSvg),
   timeline: assetUrl(timelineSvg),

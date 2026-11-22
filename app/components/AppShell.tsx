@@ -2,20 +2,24 @@
 
 import { Suspense, useEffect, useId, useState } from "react";
 import { Icon } from "../assets/icons";
+import { AgentProvider, useAgent } from "../lib/agent-store";
 import { DocsProvider } from "../lib/docs-store";
 import { FinanceProvider } from "../lib/finance-store";
+import {
+  AgentFloatingWidget,
+  AgentRightSidebar,
+} from "./AgentCompanionWidget";
 import { AppToolbar } from "./AppToolbar";
 import { DocsSidebar } from "./DocsSidebar";
 import { FinanceSidebar } from "./FinanceSidebar";
 import { TransactionDialogHost } from "./finance/TransactionDialog";
 import { SettingsDialog } from "./SettingsDialog";
 
-/** Three-region layout shell with a toggleable sidebar, contextual toolbar, and main canvas. */
-export function AppShell({ children }: { children: React.ReactNode }) {
+function AppShellInner({ children }: { children: React.ReactNode }) {
   const sidebarId = useId();
+  const { settingsOpen, openSettings, closeSettings } = useAgent();
   const [desktopOpen, setDesktopOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -29,8 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [mobileOpen]);
 
   return (
-    <DocsProvider>
-    <FinanceProvider>
+    <>
       <div className="flex h-dvh bg-canvas">
         {mobileOpen && (
           <div
@@ -63,7 +66,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => {
                 setMobileOpen(false);
-                setSettingsOpen(true);
+                openSettings();
               }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium text-muted transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
             >
@@ -88,18 +91,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             />
           </Suspense>
 
-          <main className="scroll-region flex-1">
-            {children}
-          </main>
+          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+            <main className="scroll-region min-w-0 flex-1">{children}</main>
+            <Suspense fallback={null}>
+              <AgentRightSidebar />
+            </Suspense>
+          </div>
         </div>
       </div>
 
-      <SettingsDialog
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-      />
+      <Suspense fallback={null}>
+        <AgentFloatingWidget />
+      </Suspense>
+      <SettingsDialog open={settingsOpen} onClose={closeSettings} />
       <TransactionDialogHost />
-    </FinanceProvider>
+    </>
+  );
+}
+
+/** Three-region layout shell with a toggleable sidebar, contextual toolbar, and main canvas. */
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <DocsProvider>
+      <FinanceProvider>
+        <AgentProvider>
+          <AppShellInner>{children}</AppShellInner>
+        </AgentProvider>
+      </FinanceProvider>
     </DocsProvider>
   );
 }

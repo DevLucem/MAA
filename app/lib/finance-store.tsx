@@ -8,6 +8,11 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  type ImportMode,
+  prepareFinanceImport,
+  type WorkspaceFinanceExport,
+} from "./docs-transfer";
 import { createId } from "./docs-utils";
 import {
   buildTransaction,
@@ -94,6 +99,15 @@ interface FinanceContextValue {
   transactionDialog: TransactionDialogRequest | null;
   openTransactionDialog: (request: TransactionDialogRequest) => void;
   closeTransactionDialog: () => void;
+  getExportSnapshot: () => WorkspaceFinanceExport;
+  importFinance: (
+    data: WorkspaceFinanceExport,
+    mode: ImportMode
+  ) => {
+    accountsCount: number;
+    transactionsCount: number;
+    recurringCount: number;
+  };
 }
 
 interface StoredFinance {
@@ -560,6 +574,60 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const getExportSnapshot = useCallback(
+    (): WorkspaceFinanceExport => ({
+      accounts: allAccounts,
+      transactions: allTransactions,
+      recurring: allRecurring,
+      lastCurrency,
+      includeSubAccounts,
+    }),
+    [allAccounts, allTransactions, allRecurring, lastCurrency, includeSubAccounts]
+  );
+
+  const importFinance = useCallback(
+    (data: WorkspaceFinanceExport, mode: ImportMode) => {
+      const next = prepareFinanceImport(
+        {
+          accounts: allAccounts,
+          transactions: allTransactions,
+          recurring: allRecurring,
+          lastCurrency,
+          includeSubAccounts,
+        },
+        data,
+        mode
+      );
+
+      try {
+        const payload: StoredFinance = {
+          version: 1,
+          accounts: next.accounts,
+          transactions: next.transactions,
+          lastCurrency: next.lastCurrency,
+          includeSubAccounts: next.includeSubAccounts,
+          recurring: next.recurring,
+        };
+        localStorage.setItem(FINANCE_STORAGE_KEY, JSON.stringify(payload));
+      } catch {
+        // Ignore quota or storage restriction errors
+      }
+
+      setAllAccounts(next.accounts);
+      setAllTransactions(next.transactions);
+      setAllRecurring(next.recurring);
+      setLastCurrency(next.lastCurrency);
+      setIncludeSubAccounts(next.includeSubAccounts);
+
+      return {
+        accountsCount: data.accounts.length,
+        transactionsCount: data.transactions.length,
+        recurringCount: data.recurring.length,
+      };
+    },
+    [allAccounts, allTransactions, allRecurring, lastCurrency, includeSubAccounts]
+  );
+
   const value = useMemo<FinanceContextValue>(
     () => ({
       hydrated,
@@ -593,6 +661,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       transactionDialog,
       openTransactionDialog,
       closeTransactionDialog,
+      getExportSnapshot,
+      importFinance,
     }),
     [
       hydrated,
@@ -625,6 +695,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       transactionDialog,
       openTransactionDialog,
       closeTransactionDialog,
+      getExportSnapshot,
+      importFinance,
     ]
   );
 

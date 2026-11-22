@@ -3,6 +3,15 @@
 :root {
   color-scheme: light dark;
 
+  &[data-theme="dark"],
+  &:has(> head > meta[name="color-scheme"][content="dark"]) {
+    color-scheme: dark;
+  }
+  &[data-theme="light"],
+  &:has(> head > meta[name="color-scheme"][content="light"]) {
+    color-scheme: light;
+  }
+
   /* Raw light/dark palette tokens */
   --canvas-light: #ffffff;
   --canvas-dark: #0f0f11;
@@ -55,7 +64,7 @@
 
 /* Fallback for browsers without light-dark() support */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]):not(:has(> head > meta[name="color-scheme"][content="light"])) {
     --canvas: var(--canvas-dark);
     --surface: var(--surface-dark);
     --border: var(--border-dark);
@@ -70,6 +79,23 @@
     --success: var(--success-dark);
     --success-foreground: var(--success-foreground-dark);
   }
+}
+
+:root[data-theme="dark"],
+:root:has(> head > meta[name="color-scheme"][content="dark"]) {
+  --canvas: var(--canvas-dark);
+  --surface: var(--surface-dark);
+  --border: var(--border-dark);
+  --foreground: var(--foreground-dark);
+  --muted: var(--muted-dark);
+  --primary: var(--primary-dark);
+  --primary-foreground: var(--primary-foreground-dark);
+  --secondary: var(--secondary-dark);
+  --secondary-foreground: var(--secondary-foreground-dark);
+  --danger: var(--danger-dark);
+  --danger-foreground: var(--danger-foreground-dark);
+  --success: var(--success-dark);
+  --success-foreground: var(--success-foreground-dark);
 }
 
 /* Progressive enhancement using light-dark() so subtree color-scheme overrides work automatically */
@@ -226,6 +252,67 @@
     overscroll-behavior-x: contain;
   }
 
+  .auto-fit-textarea {
+    field-sizing: content;
+    height: auto;
+    width: 100%;
+    min-block-size: 3lh;
+    max-block-size: 9lh;
+  }
+
+  .chat-composer-textarea {
+    field-sizing: content;
+    height: auto;
+    width: 100%;
+    min-block-size: 2.5lh;
+    max-block-size: 10lh;
+  }
+
+  .chat-initial-target {
+    scroll-initial-target: nearest;
+  }
+
+  .agent-wavy-ring {
+    filter: drop-shadow(0 0 6px rgb(56 189 248 / 0.8))
+      drop-shadow(0 0 14px rgb(37 99 235 / 0.6));
+  }
+
+  .agent-wave-pulse {
+    transform-box: view-box;
+    transform-origin: 50% 50%;
+    animation: agent-ring-pulse 2.2s ease-in-out infinite;
+    @media (prefers-reduced-motion: reduce) {
+      animation-duration: 8s;
+    }
+  }
+
+  .agent-wave-layer-1 {
+    transform-box: view-box;
+    transform-origin: 50% 50%;
+    animation: agent-wave-spin-cw 2.8s linear infinite;
+    @media (prefers-reduced-motion: reduce) {
+      animation-duration: 12s;
+    }
+  }
+
+  .agent-wave-layer-2 {
+    transform-box: view-box;
+    transform-origin: 50% 50%;
+    animation: agent-wave-spin-ccw 3.8s linear infinite;
+    @media (prefers-reduced-motion: reduce) {
+      animation-duration: 16s;
+    }
+  }
+
+  .agent-wave-layer-3 {
+    transform-box: view-box;
+    transform-origin: 50% 50%;
+    animation: agent-wave-spin-cw 5.2s linear infinite;
+    @media (prefers-reduced-motion: reduce) {
+      animation-duration: 20s;
+    }
+  }
+
   .doc-drag-handle {
     touch-action: none;
     -webkit-user-select: none;
@@ -237,5 +324,39 @@
     cursor: grabbing !important;
     -webkit-user-select: none;
     user-select: none;
+  }
+}
+
+@keyframes agent-ring-pulse {
+  0%,
+  100% {
+    transform: scale(0.96);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+@keyframes agent-wave-spin-cw {
+  from {
+    transform: rotate(0deg) scale(0.98);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.06);
+  }
+  to {
+    transform: rotate(360deg) scale(0.98);
+  }
+}
+
+@keyframes agent-wave-spin-ccw {
+  from {
+    transform: rotate(360deg) scale(1.05);
+  }
+  50% {
+    transform: rotate(180deg) scale(0.96);
+  }
+  to {
+    transform: rotate(0deg) scale(1.05);
   }
 }

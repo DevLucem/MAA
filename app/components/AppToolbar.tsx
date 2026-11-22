@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Fragment, useCallback, useMemo, useState } from "react";
 import { Icon } from "../assets/icons";
+import { useAgent } from "../lib/agent-store";
 import { useDocs } from "../lib/docs-store";
 import { getDocAncestors, getDocStats } from "../lib/docs-utils";
 import { useFinance } from "../lib/finance-store";
@@ -55,6 +56,7 @@ export function AppToolbar({
   const pathname = usePathname();
   const { docs, getDatabase } = useDocs();
   const { accounts: financeAccounts } = useFinance();
+  const { activeSession } = useAgent();
 
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -167,6 +169,20 @@ export function AppToolbar({
           >
             MAA
           </Link>
+
+          {pathname === "/" && (
+            <>
+              <span aria-hidden="true" className="text-muted">
+                /
+              </span>
+              <span className="inline-flex min-w-0 items-center gap-1.5 truncate rounded px-1.5 py-1 font-medium text-foreground">
+                <Icon name="bot" className="size-3.5 shrink-0 text-primary" />
+                <span className="truncate">
+                  {activeSession.title || "Hermes Agent"}
+                </span>
+              </span>
+            </>
+          )}
 
           {isDocsRoute && (
             <>

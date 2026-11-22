@@ -689,23 +689,17 @@ export function DocsProvider({ children }: { children: React.ReactNode }) {
 
   const importWorkspace = useCallback(
     (bundle: WorkspaceExportBundle, mode: ImportMode) => {
-      const next = prepareImportState(docs, databases, bundle, mode);
-      const nextAllDocs =
-        mode === "replace" ? next.docs : [...next.docs, ...trashedDocs];
-      const nextAllDbs =
-        mode === "replace"
-          ? next.databases
-          : [...next.databases, ...trashedDatabases];
-      saveDocs(nextAllDocs);
-      saveDatabases(nextAllDbs);
-      setAllDocs(nextAllDocs);
-      setAllDatabases(nextAllDbs);
+      const next = prepareImportState(allDocs, allDatabases, bundle, mode);
+      saveDocs(next.docs);
+      saveDatabases(next.databases);
+      setAllDocs(next.docs);
+      setAllDatabases(next.databases);
       return {
         docsCount: bundle.docs.length,
         databasesCount: bundle.databases.length,
       };
     },
-    [databases, docs, trashedDatabases, trashedDocs]
+    [allDatabases, allDocs]
   );
 
   const ensureBlockSynced = useCallback(

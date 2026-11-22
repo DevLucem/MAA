@@ -27,8 +27,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} antialiased`}
     >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var s=localStorage.getItem("color-scheme");if(s==="light"||s==="dark"){document.documentElement.dataset.theme=s;}else{delete document.documentElement.dataset.theme;}var m=document.querySelectorAll('meta[name="color-scheme"]');for(var i=0;i<m.length;i++){m[i].content=s??"light dark";}}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="bg-canvas text-foreground font-sans">
         <AppShell>{children}</AppShell>
       </body>
