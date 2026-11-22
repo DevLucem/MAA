@@ -6,7 +6,9 @@ import type { PropertyValue } from "../lib/database-types";
 import { useDocs } from "../lib/docs-store";
 import { blockToText, type Doc } from "../lib/docs-utils";
 import { useFinance } from "../lib/finance-store";
+import { useTodos } from "../lib/todos-store";
 import { FinanceTrashList } from "./finance/FinanceTrashList";
+import { TodoTrashList } from "./todos/TodoTrashList";
 
 interface TrashSettingsPanelProps {
   onFeedback: (message: string) => void;
@@ -82,6 +84,7 @@ export function TrashSettingsPanel({ onFeedback }: TrashSettingsPanelProps) {
     permanentlyDeleteDocs,
   } = useDocs();
   const { trashedAccounts } = useFinance();
+  const { trashedProjects } = useTodos();
 
   const [query, setQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -206,8 +209,16 @@ export function TrashSettingsPanel({ onFeedback }: TrashSettingsPanelProps) {
     );
   };
 
-  if (trashedDocs.length === 0 && trashedAccounts.length > 0) {
-    return <FinanceTrashList onFeedback={onFeedback} />;
+  if (
+    trashedDocs.length === 0 &&
+    (trashedAccounts.length > 0 || trashedProjects.length > 0)
+  ) {
+    return (
+      <div className="space-y-4">
+        <FinanceTrashList onFeedback={onFeedback} />
+        <TodoTrashList onFeedback={onFeedback} />
+      </div>
+    );
   }
 
   if (trashedDocs.length === 0) {
@@ -218,8 +229,8 @@ export function TrashSettingsPanel({ onFeedback }: TrashSettingsPanelProps) {
           Trash is empty
         </p>
         <p className="mt-1 text-xs text-muted">
-          Pages and finance accounts moved to Trash appear here so you can
-          restore or permanently delete them.
+          Pages, finance accounts, and todo projects moved to Trash appear here
+          so you can restore or permanently delete them.
         </p>
       </div>
     );
@@ -396,6 +407,7 @@ export function TrashSettingsPanel({ onFeedback }: TrashSettingsPanelProps) {
       )}
 
       <FinanceTrashList onFeedback={onFeedback} />
+      <TodoTrashList onFeedback={onFeedback} />
     </div>
   );
 }

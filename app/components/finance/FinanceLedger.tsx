@@ -48,7 +48,7 @@ function SummaryCards({ summaries }: { summaries: CurrencySummary[] }) {
       {summaries.map((s) => (
         <div
           key={s.currency}
-          className="w-[min(18rem,80vw)] shrink-0 snap-start rounded-xl border border-border bg-surface p-4"
+          className="w-max min-w-[min(18rem,80vw)] max-w-[90vw] shrink-0 snap-start rounded-xl border border-border bg-surface p-4"
         >
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-medium text-muted">Net · {s.currency}</p>
@@ -63,7 +63,7 @@ function SummaryCards({ summaries }: { summaries: CurrencySummary[] }) {
           >
             {formatMoney(s.net, s.currency, { signed: true })}
           </p>
-          <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-border pt-3 text-xs">
+          <dl className="mt-3 grid grid-cols-3 gap-x-4 gap-y-2 border-t border-border pt-3 text-xs">
             <div>
               <dt className="text-muted">Income</dt>
               <dd className="mt-0.5 font-medium tabular-nums">

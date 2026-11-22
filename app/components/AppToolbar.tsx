@@ -9,8 +9,11 @@ import { useDocs } from "../lib/docs-store";
 import { getDocAncestors, getDocStats } from "../lib/docs-utils";
 import { useFinance } from "../lib/finance-store";
 import { accountDisplayName, getAccountAncestors } from "../lib/finance-utils";
+import { useTodos } from "../lib/todos-store";
+import { getProjectAncestors, projectDisplayName } from "../lib/todos-utils";
 import { DocToolbarActions } from "./toolbar/DocToolbarActions";
 import { FinanceToolbarActions } from "./toolbar/FinanceToolbarActions";
+import { TodosToolbarActions } from "./toolbar/TodosToolbarActions";
 
 function SidebarToggleButton({
   open,
@@ -56,6 +59,7 @@ export function AppToolbar({
   const pathname = usePathname();
   const { docs, getDatabase } = useDocs();
   const { accounts: financeAccounts } = useFinance();
+  const { projects: todoProjects } = useTodos();
   const { activeSession } = useAgent();
 
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
@@ -140,6 +144,27 @@ export function AppToolbar({
     financeBreadcrumbs[financeBreadcrumbs.length - 1].id === financeAccountId
       ? financeBreadcrumbs[financeBreadcrumbs.length - 1]
       : null;
+
+  const isTodosRoute =
+    pathname === "/todos" || pathname.startsWith("/todos/");
+  const todoProjectId = pathname.startsWith("/todos/project/")
+    ? decodeURIComponent(
+        pathname.slice("/todos/project/".length).split("/")[0] ?? ""
+      )
+    : null;
+  const todoProjectBreadcrumbs = useMemo(
+    () =>
+      todoProjectId ? getProjectAncestors(todoProjects, todoProjectId) : [],
+    [todoProjectId, todoProjects]
+  );
+  const activeTodoProject =
+    todoProjectBreadcrumbs.length > 0 &&
+    todoProjectBreadcrumbs[todoProjectBreadcrumbs.length - 1].id ===
+      todoProjectId
+      ? todoProjectBreadcrumbs[todoProjectBreadcrumbs.length - 1]
+      : null;
+
+  const todosSubViewLabel = pathname === "/todos/inbox" ? "Inbox" : null;
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-2 bg-canvas px-3">
@@ -255,6 +280,96 @@ export function AppToolbar({
                         {account.icon && (
                           <span aria-hidden="true" className="shrink-0 leading-none">
                             {account.icon}
+                          </span>
+                        )}
+                        <span className="truncate">{label}</span>
+                      </Link>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </>
+          )}
+
+          {isTodosRoute && (
+            <>
+              <span aria-hidden="true" className="text-muted">
+                /
+              </span>
+              {pathname === "/todos" ? (
+                <span
+                  aria-current="page"
+                  className="truncate rounded px-1.5 py-1 font-medium text-foreground"
+                >
+                  Todos
+                </span>
+              ) : (
+                <Link
+                  href="/todos"
+                  className="shrink-0 rounded px-1.5 py-1 text-muted transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  Todos
+                </Link>
+              )}
+
+              {todosSubViewLabel && (
+                <>
+                  <span aria-hidden="true" className="text-muted">
+                    /
+                  </span>
+                  <span
+                    aria-current="page"
+                    className="truncate rounded px-1.5 py-1 font-medium text-foreground"
+                  >
+                    {todosSubViewLabel}
+                  </span>
+                </>
+              )}
+
+              {todoProjectBreadcrumbs.map((proj, idx) => {
+                const isLast = idx === todoProjectBreadcrumbs.length - 1;
+                const label = projectDisplayName(proj);
+                return (
+                  <Fragment key={proj.id}>
+                    <span aria-hidden="true" className="text-muted">
+                      /
+                    </span>
+                    {isLast ? (
+                      <span
+                        aria-current="page"
+                        className="inline-flex min-w-0 items-center gap-1.5 truncate rounded px-1.5 py-1 font-medium text-foreground"
+                      >
+                        {proj.icon ? (
+                          <span aria-hidden="true" className="shrink-0 leading-none">
+                            {proj.icon}
+                          </span>
+                        ) : (
+                          <span
+                            aria-hidden="true"
+                            className="inline-flex size-3.5 shrink-0 items-center justify-center"
+                            style={{ color: `var(--notion-${proj.color})` }}
+                          >
+                            <Icon name="hash" className="size-3.5" />
+                          </span>
+                        )}
+                        <span className="truncate">{label}</span>
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/todos/project/${encodeURIComponent(proj.id)}`}
+                        className="inline-flex max-w-36 items-center gap-1.5 truncate rounded px-1.5 py-1 text-muted transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                      >
+                        {proj.icon ? (
+                          <span aria-hidden="true" className="shrink-0 leading-none">
+                            {proj.icon}
+                          </span>
+                        ) : (
+                          <span
+                            aria-hidden="true"
+                            className="inline-flex size-3.5 shrink-0 items-center justify-center"
+                            style={{ color: `var(--notion-${proj.color})` }}
+                          >
+                            <Icon name="hash" className="size-3.5" />
                           </span>
                         )}
                         <span className="truncate">{label}</span>
@@ -391,6 +506,22 @@ export function AppToolbar({
           account={activeFinanceAccount}
           copiedLabel={copiedLabel}
           onCopyLink={handleCopyLink}
+        />
+      )}
+
+      {!activeDoc && !activeRouteDb && !activeFinanceAccount && isTodosRoute && (
+        <TodosToolbarActions
+          project={activeTodoProject}
+          defaultProjectId={
+            activeTodoProject
+              ? activeTodoProject.id
+              : pathname === "/todos/inbox"
+                ? null
+                : undefined
+          }
+          copiedLabel={copiedLabel}
+          onCopyLink={handleCopyLink}
+          onFlashLabel={flashCopied}
         />
       )}
 

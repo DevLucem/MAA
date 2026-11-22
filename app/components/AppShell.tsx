@@ -5,6 +5,7 @@ import { Icon } from "../assets/icons";
 import { AgentProvider, useAgent } from "../lib/agent-store";
 import { DocsProvider } from "../lib/docs-store";
 import { FinanceProvider } from "../lib/finance-store";
+import { TodosProvider } from "../lib/todos-store";
 import {
   AgentFloatingWidget,
   AgentRightSidebar,
@@ -14,6 +15,8 @@ import { DocsSidebar } from "./DocsSidebar";
 import { FinanceSidebar } from "./FinanceSidebar";
 import { TransactionDialogHost } from "./finance/TransactionDialog";
 import { SettingsDialog } from "./SettingsDialog";
+import { TodoDialogsHost } from "./todos/TodoDialogsHost";
+import { TodosSidebar } from "./TodosSidebar";
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const sidebarId = useId();
@@ -58,6 +61,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             <Suspense fallback={null}>
               <DocsSidebar onNavigate={() => setMobileOpen(false)} />
               <FinanceSidebar onNavigate={() => setMobileOpen(false)} />
+              <TodosSidebar onNavigate={() => setMobileOpen(false)} />
             </Suspense>
           </div>
 
@@ -105,6 +109,9 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       </Suspense>
       <SettingsDialog open={settingsOpen} onClose={closeSettings} />
       <TransactionDialogHost />
+      <Suspense fallback={null}>
+        <TodoDialogsHost />
+      </Suspense>
     </>
   );
 }
@@ -114,9 +121,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <DocsProvider>
       <FinanceProvider>
-        <AgentProvider>
-          <AppShellInner>{children}</AppShellInner>
-        </AgentProvider>
+        <TodosProvider>
+          <AgentProvider>
+            <AppShellInner>{children}</AppShellInner>
+          </AgentProvider>
+        </TodosProvider>
       </FinanceProvider>
     </DocsProvider>
   );

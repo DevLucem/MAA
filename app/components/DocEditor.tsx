@@ -20,6 +20,7 @@ import {
   type DocBlock,
   htmlToPlainText,
   resolveCoverBackground,
+  type TodoEmbedConfig,
 } from "../lib/docs-utils";
 import {
   findBlockInTree,
@@ -28,6 +29,11 @@ import {
   formatSyncClipboardToken,
   isBlockInsideSyncedColumns,
 } from "../lib/synced-blocks";
+import { useTodos } from "../lib/todos-store";
+import {
+  type ParsedTodoEmbedLink,
+  projectDisplayName,
+} from "../lib/todos-utils";
 import { useDismissible } from "../lib/use-dismissible";
 import { IconPickerPopover } from "./IconPickerPopover";
 import { PagePropertiesPanel } from "./PagePropertiesPanel";
@@ -72,6 +78,7 @@ export function DocEditor() {
     insertSyncedBlock,
     unsyncBlock,
   } = useDocs();
+  const { getAnyProject, sections: todoSections } = useTodos();
 
   const doc = getDoc(id);
 
@@ -315,6 +322,24 @@ export function DocEditor() {
     [doc, updateDoc]
   );
 
+  const handleUpdateTodoEmbed = useCallback(
+    (blockId: string, todoEmbed: TodoEmbedConfig, label?: string) => {
+      if (!doc) return;
+      updateDoc(doc.id, {
+        blocks: mapBlocksTree(doc.blocks, (b) =>
+          b.id === blockId
+            ? {
+                ...b,
+                todoEmbed,
+                ...(label !== undefined ? { content: label } : {}),
+              }
+            : b
+        ),
+      });
+    },
+    [doc, updateDoc]
+  );
+
   const handleIndentBlock = useCallback(
     (blockId: string, delta: 1 | -1) => {
       if (!doc) return;
@@ -501,6 +526,23 @@ export function DocEditor() {
         return;
       }
 
+      if (type === "todo-embed") {
+        const updatedBlocks = mapBlocksTree(doc.blocks, (b) =>
+          b.id === blockId
+            ? {
+                id: b.id,
+                type: "todo-embed",
+                content: "",
+                ...(b.syncGroupId ? { syncGroupId: b.syncGroupId } : {}),
+              }
+            : b
+        );
+        updateDoc(doc.id, { blocks: updatedBlocks });
+        setSlashState(null);
+        setBlockMenu(null);
+        return;
+      }
+
       let focusTargetId = blockId;
       const updatedBlocks = mutateBlockListTree(
         doc.blocks,
@@ -661,6 +703,7 @@ export function DocEditor() {
         if (
           created.type !== "divider" &&
           created.type !== "database" &&
+          created.type !== "todo-embed" &&
           created.type !== "columns"
         ) {
           pendingFocusIdRef.current = created.id;
@@ -668,6 +711,78 @@ export function DocEditor() {
       }
     },
     [announce, doc, insertSyncedBlock]
+  );
+
+  const handlePasteTodoEmbed = useCallback(
+    (anchorBlockId: string, parsed: ParsedTodoEmbedLink): boolean => {
+      if (!doc) return false;
+      const project = getAnyProject(parsed.projectId);
+      if (!project) return false;
+
+      const section = parsed.sectionId
+        ? todoSections.find(
+            (s) => s.id === parsed.sectionId && s.projectId === project.id
+          )
+        : undefined;
+      const projectName = projectDisplayName(project);
+      const label = section ? `${projectName} / ${section.name}` : projectName;
+
+      const embedBlock: DocBlock = {
+        id: createId(),
+        type: "todo-embed",
+        content: label,
+        todoEmbed: {
+          projectId: project.id,
+          ...(parsed.sectionId ? { sectionId: parsed.sectionId } : {}),
+          range: "all",
+          layout: "list",
+        },
+      };
+
+      let trailingId: string | null = null;
+      const nextBlocks = mutateBlockListTree(
+        doc.blocks,
+        anchorBlockId,
+        (list, idx) => {
+          const anchor = list[idx];
+          const replaceHere =
+            anchor.type === "paragraph" &&
+            !htmlToPlainText(anchor.content).trim() &&
+            !anchor.syncGroupId;
+          const copy = [...list];
+          let embedIdx: number;
+          if (replaceHere) {
+            copy[idx] = embedBlock;
+            embedIdx = idx;
+          } else {
+            copy.splice(idx + 1, 0, embedBlock);
+            embedIdx = idx + 1;
+          }
+          if (embedIdx === copy.length - 1) {
+            const trailing: DocBlock = {
+              id: createId(),
+              type: "paragraph",
+              content: "",
+            };
+            trailingId = trailing.id;
+            copy.push(trailing);
+          }
+          return copy;
+        }
+      );
+
+      updateDoc(doc.id, { blocks: nextBlocks });
+      setSlashState(null);
+      setBlockMenu(null);
+      if (trailingId) pendingFocusIdRef.current = trailingId;
+      announce(
+        section
+          ? `Embedded section "${section.name}"`
+          : `Embedded project "${projectName}"`
+      );
+      return true;
+    },
+    [announce, doc, getAnyProject, todoSections, updateDoc]
   );
 
   const handleUnsync = useCallback(
@@ -753,6 +868,7 @@ export function DocEditor() {
         if (
           candidate.type !== "divider" &&
           candidate.type !== "database" &&
+          candidate.type !== "todo-embed" &&
           candidate.type !== "columns"
         ) {
           focusBlock(candidate.id);
@@ -987,9 +1103,10 @@ export function DocEditor() {
   ) => {
     const isSlashOwner = slashState?.blockId === block.id;
     const isMenuOwner = blockMenu?.blockId === block.id;
-    const isFullWidthDb =
-      block.type === "database" &&
-      Boolean(block.databaseId && getDatabase(block.databaseId)?.fullWidth);
+    const isFullWidthEmbed =
+      (block.type === "database" &&
+        Boolean(block.databaseId && getDatabase(block.databaseId)?.fullWidth)) ||
+      (block.type === "todo-embed" && Boolean(block.todoEmbed?.fullWidth));
     const syncOccurrenceCount = block.syncGroupId
       ? findSyncGroupOccurrences(docs, block.syncGroupId).length
       : 0;
@@ -1012,6 +1129,7 @@ export function DocEditor() {
         onDragEndBlock={handleDragEndBlock}
         onChangeContent={handleChangeContent}
         onUpdateBookmark={handleUpdateBookmark}
+        onUpdateTodoEmbed={handleUpdateTodoEmbed}
         onConvertBlock={handleExecuteSlashOrConvert}
         onIndentBlock={handleIndentBlock}
         onToggleTodo={handleToggleTodo}
@@ -1024,6 +1142,7 @@ export function DocEditor() {
         onPasteSyncedBlock={(anchorId, syncId) =>
           handlePasteSynced(anchorId, syncId, "replace-if-empty")
         }
+        onPasteTodoEmbed={handlePasteTodoEmbed}
         canDelete={siblingCount > 1}
         nestedInColumn={nestedInColumn}
       />
@@ -1035,7 +1154,7 @@ export function DocEditor() {
         className={`relative ${
           nestedInColumn
             ? ""
-            : isFullWidthDb
+            : isFullWidthEmbed
               ? "w-full"
               : getProseWidthClass(doc?.fullWidth)
         }`}
@@ -1215,6 +1334,7 @@ export function DocEditor() {
                   (b) =>
                     b.type !== "divider" &&
                     b.type !== "database" &&
+                    b.type !== "todo-embed" &&
                     b.type !== "columns"
                 );
                 if (firstEditable) {
@@ -1401,6 +1521,7 @@ export function DocEditor() {
               if (
                 created.type !== "divider" &&
                 created.type !== "database" &&
+                created.type !== "todo-embed" &&
                 created.type !== "columns"
               ) {
                 pendingFocusIdRef.current = created.id;

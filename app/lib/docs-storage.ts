@@ -9,6 +9,9 @@ import {
   type MoveDocTarget,
   resolveCoverBackground,
   sanitizeInlineHtml,
+  type TodoEmbedConfig,
+  type TodoEmbedLayout,
+  type TodoEmbedRange,
 } from "./docs-utils";
 
 export const STORAGE_KEY = "maa-docs-v1";
@@ -30,7 +33,41 @@ const VALID_BLOCK_TYPES = new Set<BlockType>([
   "page-link",
   "columns",
   "bookmark",
+  "todo-embed",
 ]);
+
+const VALID_TODO_EMBED_RANGES = new Set<TodoEmbedRange>([
+  "all",
+  "day",
+  "week",
+  "month",
+]);
+const VALID_TODO_EMBED_LAYOUTS = new Set<TodoEmbedLayout>(["list", "board"]);
+
+function normalizeTodoEmbed(raw: unknown): TodoEmbedConfig | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  const projectId =
+    typeof obj.projectId === "string" && obj.projectId.trim()
+      ? obj.projectId.trim()
+      : "";
+  if (!projectId) return undefined;
+
+  const cfg: TodoEmbedConfig = { projectId };
+  if (typeof obj.sectionId === "string" && obj.sectionId.trim()) {
+    cfg.sectionId = obj.sectionId.trim();
+  }
+  if (VALID_TODO_EMBED_RANGES.has(obj.range as TodoEmbedRange)) {
+    cfg.range = obj.range as TodoEmbedRange;
+  }
+  if (VALID_TODO_EMBED_LAYOUTS.has(obj.layout as TodoEmbedLayout)) {
+    cfg.layout = obj.layout as TodoEmbedLayout;
+  }
+  if (obj.fullWidth === true) {
+    cfg.fullWidth = true;
+  }
+  return cfg;
+}
 
 export function normalizeBlock(raw: unknown): DocBlock | null {
   if (!raw || typeof raw !== "object") return null;
@@ -74,6 +111,12 @@ export function normalizeBlock(raw: unknown): DocBlock | null {
   }
   if (typeof b.syncGroupId === "string" && b.syncGroupId) {
     normalized.syncGroupId = b.syncGroupId;
+  }
+  if (type === "todo-embed") {
+    const todoEmbed = normalizeTodoEmbed(b.todoEmbed);
+    if (todoEmbed) {
+      normalized.todoEmbed = todoEmbed;
+    }
   }
   if (type === "columns" && Array.isArray(b.columns)) {
     normalized.columns = b.columns.map((col) =>
@@ -327,6 +370,7 @@ export function duplicateBlocksWithFreshIds(blocks: DocBlock[]): DocBlock[] {
     const nextBlock: DocBlock = {
       ...block,
       id: createId(),
+      ...(block.todoEmbed ? { todoEmbed: { ...block.todoEmbed } } : {}),
     };
     delete nextBlock.syncGroupId;
     if (block.columns) {

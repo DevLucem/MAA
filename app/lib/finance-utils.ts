@@ -22,6 +22,10 @@ export const COMMON_CURRENCIES: readonly string[] = [
   "CAD",
   "AUD",
   "CHF",
+  "BTC",
+  "ETH",
+  "USDT",
+  "USDC",
 ];
 
 export type TransactionKind = "expense" | "income";
@@ -139,7 +143,8 @@ export const FINANCE_PERIODS: { id: FinancePeriod; label: string }[] = [
 export function normalizeCurrency(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const code = value.trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(code) ? code : null;
+  // ISO codes (USD) and crypto tickers (BTC, USDT, DOGE) of 2–10 characters.
+  return /^[A-Z][A-Z0-9]{1,9}$/.test(code) ? code : null;
 }
 
 function toPositiveNumber(value: unknown): number {
@@ -529,8 +534,9 @@ export function transactionNet(tx: FinanceTransaction): number {
   return tx.kind === "income" ? tx.amount - tx.fee : -(tx.amount + tx.fee);
 }
 
+/** Removes float noise from sums (e.g. 0.1 + 0.2) while keeping satoshi-level precision. */
 function roundMoney(value: number): number {
-  return Math.round(value * 1e6) / 1e6;
+  return Number(value.toFixed(MAX_MONEY_DECIMALS));
 }
 
 /** Per-currency totals. Currencies are never mixed or converted. */
@@ -565,31 +571,115 @@ export function summarizeByCurrency(
     .sort((a, b) => b.count - a.count || a.currency.localeCompare(b.currency));
 }
 
-const moneyFormatters = new Map<string, Intl.NumberFormat | null>();
+/** Most decimals ever displayed or kept when summing (covers satoshis and most tokens). */
+export const MAX_MONEY_DECIMALS = 10;
 
+/**
+ * Display precision for common crypto assets that Intl does not know.
+ * `min` is always shown (e.g. BTC 0.50 not BTC 0.5); more digits appear when the value has them.
+ */
+const CRYPTO_PRECISION: Record<string, { min: number }> = {
+  BTC: { min: 2 },
+  ETH: { min: 2 },
+  LTC: { min: 2 },
+  SOL: { min: 2 },
+  XMR: { min: 2 },
+  DOGE: { min: 2 },
+  USDT: { min: 2 },
+  USDC: { min: 2 },
+  SAT: { min: 0 },
+  SATS: { min: 0 },
+};
+
+/** Number of decimal places a number actually carries (handles `1e-8`), capped. */
+export function decimalPlaces(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  // Trim float noise like 0.30000000000000004 first.
+  const text = Math.abs(value).toFixed(MAX_MONEY_DECIMALS).replace(/0+$/, "");
+  const dot = text.indexOf(".");
+  return dot === -1 ? 0 : text.length - dot - 1;
+}
+
+/** Plain decimal string without exponent or grouping, for number inputs (e.g. 1e-8 → "0.00000001"). */
+export function toPlainNumberString(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  return value.toLocaleString("en-US", {
+    useGrouping: false,
+    maximumFractionDigits: MAX_MONEY_DECIMALS,
+  });
+}
+
+const defaultDigitsCache = new Map<string, number | null>();
+
+/** Standard minor-unit digits for an ISO currency (USD 2, JPY 0), or null when Intl rejects the code. */
+function isoDefaultDigits(currency: string): number | null {
+  let digits = defaultDigitsCache.get(currency);
+  if (digits === undefined) {
+    try {
+      digits = new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+      }).resolvedOptions().maximumFractionDigits ?? 2;
+    } catch {
+      digits = null;
+    }
+    defaultDigitsCache.set(currency, digits);
+  }
+  return digits;
+}
+
+const moneyFormatters = new Map<string, Intl.NumberFormat>();
+
+function getFormatter(key: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  let formatter = moneyFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(undefined, options);
+    moneyFormatters.set(key, formatter);
+  }
+  return formatter;
+}
+
+/**
+ * Formats an amount with its currency code. Shows at least the currency's standard decimals
+ * and more when the value has them (up to MAX_MONEY_DECIMALS), so BTC 0.00012345 is not
+ * rounded to BTC 0.00.
+ */
 export function formatMoney(
   value: number,
   currency: string,
   options: { signed?: boolean } = {}
 ): string {
-  const key = `${currency}|${options.signed ? "s" : ""}`;
-  let formatter = moneyFormatters.get(key);
-  if (formatter === undefined) {
-    try {
-      formatter = new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency,
-        currencyDisplay: "code",
-        signDisplay: options.signed ? "exceptZero" : "auto",
-      });
-    } catch {
-      formatter = null;
-    }
-    moneyFormatters.set(key, formatter);
+  const crypto = CRYPTO_PRECISION[currency];
+  const isoDigits = isoDefaultDigits(currency);
+  const minDigits = crypto?.min ?? isoDigits ?? 2;
+  const maxDigits = Math.min(
+    MAX_MONEY_DECIMALS,
+    Math.max(minDigits, decimalPlaces(value))
+  );
+  const signDisplay = options.signed ? "exceptZero" : "auto";
+  const key = `${currency}|${signDisplay}|${minDigits}|${maxDigits}`;
+
+  if (isoDigits !== null) {
+    // Valid 3-letter code (including non-ISO ones like BTC): let Intl place the code.
+    return getFormatter(key, {
+      style: "currency",
+      currency,
+      currencyDisplay: "code",
+      signDisplay,
+      minimumFractionDigits: minDigits,
+      maximumFractionDigits: maxDigits,
+    }).format(value);
   }
-  if (formatter) return formatter.format(value);
-  const sign = options.signed && value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(2)} ${currency}`;
+  // Longer tickers (USDT, DOGE…) are not accepted by Intl as currencies.
+  // Sign goes before the code to match Intl output ("-BTC 1.00", "+USDT 5.00").
+  const number = getFormatter(`n|${currency}|${minDigits}|${maxDigits}`, {
+    style: "decimal",
+    minimumFractionDigits: minDigits,
+    maximumFractionDigits: maxDigits,
+  }).format(Math.abs(value));
+  const isZero = number.replace(/[^1-9]/g, "") === "";
+  const sign = isZero ? "" : value < 0 ? "-" : options.signed ? "+" : "";
+  return `${sign}${currency} ${number}`;
 }
 
 /* ---------- Search ---------- */
@@ -653,7 +743,8 @@ export function matchesAmountFilters(
       case "<=":
         return net <= value + epsilon;
       case "=":
-        return Math.abs(net - value) < 0.005;
+        // Match to the precision typed: "=3" ≈ 2 decimals, "=0.00012345" to 8.
+        return Math.abs(net - value) < 0.5 * 10 ** -Math.max(2, decimalPlaces(value));
     }
   });
 }

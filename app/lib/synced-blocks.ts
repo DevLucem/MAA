@@ -158,6 +158,7 @@ function cloneColumnChildrenWithFreshIds(blocks: DocBlock[]): DocBlock[] {
       ...(block.databaseId ? { databaseId: block.databaseId } : {}),
       ...(block.linkedDocId ? { linkedDocId: block.linkedDocId } : {}),
       ...(block.url ? { url: block.url } : {}),
+      ...(block.todoEmbed ? { todoEmbed: { ...block.todoEmbed } } : {}),
     };
     if (block.type === "columns" && Array.isArray(block.columns)) {
       next.columns = block.columns.map(cloneColumnChildrenWithFreshIds);
@@ -183,6 +184,7 @@ export function createSyncedBlockInstance(
     ...(template.databaseId ? { databaseId: template.databaseId } : {}),
     ...(template.linkedDocId ? { linkedDocId: template.linkedDocId } : {}),
     ...(template.url ? { url: template.url } : {}),
+    ...(template.todoEmbed ? { todoEmbed: { ...template.todoEmbed } } : {}),
   };
 
   if (template.type === "columns" && Array.isArray(template.columns)) {
@@ -203,7 +205,12 @@ export function areSyncedPayloadsEqual(a: DocBlock, b: DocBlock): boolean {
     (a.calloutIcon ?? "") !== (b.calloutIcon ?? "") ||
     (a.databaseId ?? "") !== (b.databaseId ?? "") ||
     (a.linkedDocId ?? "") !== (b.linkedDocId ?? "") ||
-    (a.url ?? "") !== (b.url ?? "")
+    (a.url ?? "") !== (b.url ?? "") ||
+    (a.todoEmbed?.projectId ?? "") !== (b.todoEmbed?.projectId ?? "") ||
+    (a.todoEmbed?.sectionId ?? "") !== (b.todoEmbed?.sectionId ?? "") ||
+    (a.todoEmbed?.range ?? "") !== (b.todoEmbed?.range ?? "") ||
+    (a.todoEmbed?.layout ?? "") !== (b.todoEmbed?.layout ?? "") ||
+    Boolean(a.todoEmbed?.fullWidth) !== Boolean(b.todoEmbed?.fullWidth)
   ) {
     return false;
   }
@@ -243,6 +250,7 @@ function applyColumnChildPayload(
       ...(tplItem.databaseId ? { databaseId: tplItem.databaseId } : {}),
       ...(tplItem.linkedDocId ? { linkedDocId: tplItem.linkedDocId } : {}),
       ...(tplItem.url ? { url: tplItem.url } : {}),
+      ...(tplItem.todoEmbed ? { todoEmbed: { ...tplItem.todoEmbed } } : {}),
     };
     if (tplItem.type === "columns" && Array.isArray(tplItem.columns)) {
       synced.columns = tplItem.columns.map((nestedCol, nestedIdx) =>
@@ -272,6 +280,7 @@ export function applySyncedPayload(
     ...(template.databaseId ? { databaseId: template.databaseId } : {}),
     ...(template.linkedDocId ? { linkedDocId: template.linkedDocId } : {}),
     ...(template.url ? { url: template.url } : {}),
+    ...(template.todoEmbed ? { todoEmbed: { ...template.todoEmbed } } : {}),
   };
 
   if (template.type === "columns" && Array.isArray(template.columns)) {
@@ -637,6 +646,9 @@ function summarizeBlockPreview(
     case "bookmark": {
       const label = htmlToPlainText(block.content).trim() || block.url || "Bookmark";
       return block.url && label !== block.url ? `${label} (${block.url})` : label;
+    }
+    case "todo-embed": {
+      return `${htmlToPlainText(block.content).trim() || "Embedded tasks"} (Tasks)`;
     }
     case "divider":
       return "Divider";

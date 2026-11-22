@@ -32,6 +32,7 @@ import {
   type RecurringFrequency,
   type RecurringRule,
   toLocalInputValue,
+  toPlainNumberString,
   trailingTagFragment,
   type TransactionKind,
 } from "../../lib/finance-utils";
@@ -121,8 +122,10 @@ function TransactionDialog({ request, onClose }: TransactionDialogProps) {
   const [tags, setTags] = useState<string[]>(source?.tags ?? []);
   const [nameFocused, setNameFocused] = useState(false);
   const [kind, setKind] = useState<TransactionKind>(source?.kind ?? "expense");
-  const [amount, setAmount] = useState(source ? String(source.amount) : "");
-  const [fee, setFee] = useState(source && source.fee > 0 ? String(source.fee) : "");
+  const [amount, setAmount] = useState(source ? toPlainNumberString(source.amount) : "");
+  const [fee, setFee] = useState(
+    source && source.fee > 0 ? toPlainNumberString(source.fee) : ""
+  );
   const initialCurrency = source?.currency ?? lastCurrency;
   const [currency, setCurrency] = useState(initialCurrency);
   // Pick from previously used currencies; switch to free entry for a new one.
@@ -527,10 +530,10 @@ function TransactionDialog({ request, onClose }: TransactionDialogProps) {
                     type="text"
                     required
                     list={`${baseId}-currencies`}
-                    pattern="[A-Za-z]{3}"
-                    maxLength={3}
+                    pattern="[A-Za-z][A-Za-z0-9]{1,9}"
+                    maxLength={10}
                     autoComplete="off"
-                    title="3-letter currency code, e.g. USD"
+                    title="Currency code or ticker, e.g. USD, BTC, USDT"
                     value={currency}
                     onChange={(e) => setCurrency(e.target.value.toUpperCase())}
                     className={`${inputClass} uppercase`}

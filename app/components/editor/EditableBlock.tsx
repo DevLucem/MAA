@@ -12,9 +12,15 @@ import {
   htmlToPlainText,
   isSafeHref,
   sanitizeInlineHtml,
+  type TodoEmbedConfig,
 } from "../../lib/docs-utils";
 import { parseSyncClipboardToken } from "../../lib/synced-blocks";
+import {
+  type ParsedTodoEmbedLink,
+  parseTodoEmbedLink,
+} from "../../lib/todos-utils";
 import { InlineDatabaseBlock } from "../InlineDatabaseBlock";
+import { InlineTodoEmbedBlock } from "../todos/InlineTodoEmbedBlock";
 import { isImeConfirming } from "./block-tree";
 import {
   BLOCK_PLACEHOLDERS,
@@ -38,6 +44,11 @@ export interface EditableBlockProps {
   onDragEndBlock: () => void;
   onChangeContent: (id: string, content: string) => void;
   onUpdateBookmark: (id: string, url: string, label: string) => void;
+  onUpdateTodoEmbed?: (
+    id: string,
+    config: TodoEmbedConfig,
+    label?: string
+  ) => void;
   onConvertBlock: (id: string, type: BlockType, content?: string) => void;
   onIndentBlock: (id: string, delta: 1 | -1) => void;
   onToggleTodo: (id: string) => void;
@@ -48,6 +59,10 @@ export interface EditableBlockProps {
   onSlashKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
   onNavigateInternal: (href: string) => void;
   onPasteSyncedBlock?: (blockId: string, syncGroupId: string) => void;
+  onPasteTodoEmbed?: (
+    blockId: string,
+    parsed: ParsedTodoEmbedLink
+  ) => boolean;
   canDelete: boolean;
   nestedInColumn?: boolean;
 }
@@ -90,6 +105,10 @@ function getHandlePositionClasses(
       inlineOffset = "mt-0.5";
       desktopOffset = "sm:top-0.5";
       break;
+    case "todo-embed":
+      inlineOffset = "mt-4";
+      desktopOffset = "sm:top-4";
+      break;
     case "page-link":
       inlineOffset = "";
       desktopOffset = "sm:top-1.5";
@@ -126,6 +145,7 @@ export function EditableBlock({
   onDragEndBlock,
   onChangeContent,
   onUpdateBookmark,
+  onUpdateTodoEmbed,
   onConvertBlock,
   onIndentBlock,
   onToggleTodo,
@@ -136,6 +156,7 @@ export function EditableBlock({
   onSlashKeyDown,
   onNavigateInternal,
   onPasteSyncedBlock,
+  onPasteTodoEmbed,
   canDelete,
   nestedInColumn = false,
 }: EditableBlockProps) {
@@ -313,6 +334,13 @@ export function EditableBlock({
       document.execCommand("insertText", false, plain);
       return;
     }
+    const parsedTodoEmbed = parseTodoEmbedLink(
+      plain,
+      typeof window !== "undefined" ? window.location.origin : undefined
+    );
+    if (parsedTodoEmbed && onPasteTodoEmbed?.(block.id, parsedTodoEmbed)) {
+      return;
+    }
     const html = event.clipboardData.getData("text/html");
     const safeHtml = html ? sanitizeInlineHtml(html) : "";
     if (safeHtml) {
@@ -329,7 +357,7 @@ export function EditableBlock({
     const href = anchor.getAttribute("href");
     if (!href || !isSafeHref(href)) return;
     event.preventDefault();
-    if (href.startsWith("/docs/")) {
+    if (href.startsWith("/docs/") || href.startsWith("/todos/")) {
       onNavigateInternal(href);
     } else {
       window.open(href, "_blank", "noopener,noreferrer");
@@ -414,6 +442,29 @@ export function EditableBlock({
               Missing database reference
             </div>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === "todo-embed") {
+    return (
+      <div
+        onDragOver={(e) => onDragOverBlock(block.id, e)}
+        onDrop={(e) => onDropOnBlock(block.id, e)}
+        className={`group relative my-5 flex items-start gap-1.5 ${
+          isDropTarget ? "border-t-2 border-primary" : ""
+        }`}
+      >
+        {handleButton}
+        <div className="min-w-0 flex-1">
+          <InlineTodoEmbedBlock
+            config={block.todoEmbed}
+            fallbackLabel={htmlToPlainText(block.content)}
+            onUpdateConfig={(cfg, label) =>
+              onUpdateTodoEmbed?.(block.id, cfg, label)
+            }
+          />
         </div>
       </div>
     );

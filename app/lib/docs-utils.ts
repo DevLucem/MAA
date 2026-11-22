@@ -1,5 +1,16 @@
 import type { BlockColor, NotionColor, PropertyValue } from "./database-types";
 
+export type TodoEmbedRange = "all" | "day" | "week" | "month";
+export type TodoEmbedLayout = "list" | "board";
+
+export interface TodoEmbedConfig {
+  projectId: string;
+  sectionId?: string;
+  range?: TodoEmbedRange;
+  layout?: TodoEmbedLayout;
+  fullWidth?: boolean;
+}
+
 export type BlockType =
   | "paragraph"
   | "h1"
@@ -15,7 +26,8 @@ export type BlockType =
   | "database"
   | "page-link"
   | "columns"
-  | "bookmark";
+  | "bookmark"
+  | "todo-embed";
 
 export interface DocBlock {
   id: string;
@@ -30,6 +42,7 @@ export interface DocBlock {
   columns?: DocBlock[][];
   url?: string;
   syncGroupId?: string;
+  todoEmbed?: TodoEmbedConfig;
 }
 
 export interface Doc {
@@ -240,7 +253,9 @@ const ALLOWED_NOTION_COLORS = new Set<NotionColor>([
 export function isSafeHref(href: string): boolean {
   if (!href || typeof href !== "string") return false;
   const trimmed = href.trim();
-  if (trimmed.startsWith("/docs/")) return true;
+  if (trimmed.startsWith("/docs/") || trimmed.startsWith("/todos/")) {
+    return true;
+  }
   return /^https?:\/\//i.test(trimmed);
 }
 
@@ -433,7 +448,8 @@ export function getDocStats(doc: Doc): DocStats {
     if (
       block.type === "divider" ||
       block.type === "database" ||
-      block.type === "columns"
+      block.type === "columns" ||
+      block.type === "todo-embed"
     ) {
       continue;
     }
@@ -540,6 +556,7 @@ export function getWorkspaceInsights(
         case "page-link":
         case "bookmark":
         case "columns":
+        case "todo-embed":
           databasesAndEmbeds += 1;
           break;
       }
@@ -619,6 +636,13 @@ export function formatEditedTime(iso: string, nowMs: number | null): string {
   return `Edited ${SHORT_MONTHS[date.getMonth()]} ${date.getDate()}`;
 }
 
+function formatTodoEmbedHref(embed: TodoEmbedConfig): string {
+  const base = `/todos/project/${encodeURIComponent(embed.projectId)}`;
+  return embed.sectionId
+    ? `${base}?section=${encodeURIComponent(embed.sectionId)}`
+    : base;
+}
+
 function serializeBlocksToMarkdown(blocks: DocBlock[]): string[] {
   const lines: string[] = [];
   let numbered = 0;
@@ -672,6 +696,18 @@ function serializeBlocksToMarkdown(blocks: DocBlock[]): string[] {
       case "bookmark":
         lines.push(`- [${text || block.url || "Link"}](${block.url ?? ""})`);
         break;
+      case "todo-embed": {
+        const label = text || "Embedded tasks";
+        if (block.todoEmbed?.projectId) {
+          lines.push(
+            `### [${label}](${formatTodoEmbedHref(block.todoEmbed)}) (Tasks)`,
+            ""
+          );
+        } else {
+          lines.push(`### ${label} (Tasks)`, "");
+        }
+        break;
+      }
       case "columns":
         if (Array.isArray(block.columns)) {
           for (const col of block.columns) {
@@ -705,6 +741,11 @@ export function blockToText(block: DocBlock): string {
   if (block.type === "bookmark") {
     const label = htmlToPlainText(block.content);
     return block.url ? (label ? `${label} (${block.url})` : block.url) : label;
+  }
+  if (block.type === "todo-embed" && block.todoEmbed?.projectId) {
+    const label = htmlToPlainText(block.content).trim();
+    const href = formatTodoEmbedHref(block.todoEmbed);
+    return label ? `${label} (${href})` : href;
   }
   if (block.type === "columns" && Array.isArray(block.columns)) {
     return block.columns

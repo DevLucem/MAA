@@ -59,7 +59,9 @@ export function DatabaseGalleryView({
               (b) =>
                 b.type !== "divider" &&
                 b.type !== "columns" &&
-                (b.type === "database" || htmlToPlainText(b.content).length > 0)
+                (b.type === "database" ||
+                  b.type === "todo-embed" ||
+                  htmlToPlainText(b.content).length > 0)
             )
             .slice(0, 4);
 
@@ -92,6 +94,16 @@ export function DatabaseGalleryView({
                               className="truncate font-medium text-foreground/80"
                             >
                               🗃️ {text}
+                            </p>
+                          );
+                        }
+                        if (block.type === "todo-embed") {
+                          return (
+                            <p
+                              key={block.id}
+                              className="truncate font-medium text-foreground/80"
+                            >
+                              ☑️ {text || "Embedded tasks"}
                             </p>
                           );
                         }

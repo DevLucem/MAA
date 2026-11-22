@@ -22,6 +22,7 @@ const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
   "page-link": "Sub-page",
   columns: "Columns",
   bookmark: "Bookmark",
+  "todo-embed": "Tasks embed",
 };
 
 interface LinkBlockDialogProps {

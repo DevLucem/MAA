@@ -26,6 +26,8 @@ import {
   submitHermesRunApproval,
   submitHermesRunClarification,
 } from "./hermes-client";
+import { useTodos } from "./todos-store";
+import { projectDisplayName } from "./todos-utils";
 import { useTodayIsoDate } from "./use-client-date";
 
 export const HERMES_CONFIG_STORAGE_KEY = "maa-hermes-config-v1";
@@ -115,6 +117,12 @@ const AgentContext = createContext<AgentContextValue | null>(null);
 export function AgentProvider({ children }: { children: React.ReactNode }) {
   const { docs, databases } = useDocs();
   const { accounts, transactions } = useFinance();
+  const {
+    activeTasks: todoActiveTasks,
+    projects: todoProjects,
+    todayCount: todoTodayCount,
+    overdueCount: todoOverdueCount,
+  } = useTodos();
   const todayIso = useTodayIsoDate() ?? "";
 
   const [hydrated, setHydrated] = useState(false);
@@ -372,17 +380,32 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       .slice(0, 10)
       .map((a) => accountDisplayName(a))
       .join(", ");
+    const todoProjectNames = todoProjects
+      .slice(0, 10)
+      .map((p) => projectDisplayName(p))
+      .join(", ");
 
     return [
       "MAA Workspace Context Snapshot:",
       `- Documents: ${docs.length} total (${databases.length} inline databases). Recent titles: ${docTitles || "none"}.`,
-      `- Tasks: ${insights.todoCompleted}/${insights.todoTotal} completed.`,
-      openTodosText ? `Open To-dos:\n${openTodosText}` : "",
+      `- Doc Tasks: ${insights.todoCompleted}/${insights.todoTotal} completed.`,
+      openTodosText ? `Open Doc To-dos:\n${openTodosText}` : "",
+      `- Todos: ${todoActiveTasks.length} open tasks (${todoTodayCount} due today/overdue, ${todoOverdueCount} overdue), ${todoProjects.length} projects (${todoProjectNames || "Inbox only"}).`,
       `- Finance: ${accounts.length} accounts (${accountNames || "none"}), ${transactions.length} recorded transactions.`,
     ]
       .filter(Boolean)
       .join("\n");
-  }, [accounts, databases.length, docs, todayIso, transactions.length]);
+  }, [
+    accounts,
+    databases.length,
+    docs,
+    todayIso,
+    todoActiveTasks.length,
+    todoOverdueCount,
+    todoProjects,
+    todoTodayCount,
+    transactions.length,
+  ]);
 
   const appendOrUpdateAssistantMessage = useCallback(
     (

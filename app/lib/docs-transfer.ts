@@ -22,10 +22,24 @@ import {
   normalizeAgentSessions,
   normalizeHermesConfig,
 } from "./hermes-client";
+import {
+  normalizeCompletionLog,
+  normalizeLabel,
+  normalizeLabelName,
+  normalizeProject,
+  normalizeSection,
+  normalizeTask,
+  repairProjectHierarchy,
+  type TodoCompletionLog,
+  type TodoLabel,
+  type TodoProject,
+  type TodoSection,
+  type TodoTask,
+} from "./todos-utils";
 
 export const WORKSPACE_EXPORT_FORMAT = "maa-workspace" as const;
-export const WORKSPACE_EXPORT_SCHEMA_VERSION = 2 as const;
-const SUPPORTED_SCHEMA_VERSIONS = new Set([1, 2]);
+export const WORKSPACE_EXPORT_SCHEMA_VERSION = 3 as const;
+const SUPPORTED_SCHEMA_VERSIONS = new Set([1, 2, 3]);
 
 export type ImportMode = "merge" | "replace";
 export type ThemePreference = "light" | "system" | "dark";
@@ -38,6 +52,14 @@ export interface WorkspaceFinanceExport {
   includeSubAccounts: boolean;
 }
 
+export interface WorkspaceTodosExport {
+  projects: TodoProject[];
+  sections: TodoSection[];
+  labels: TodoLabel[];
+  tasks: TodoTask[];
+  completionLog?: TodoCompletionLog[];
+}
+
 export interface WorkspaceAgentExport {
   config: HermesAgentConfig;
   sessions: AgentChatSession[];
@@ -47,6 +69,7 @@ export interface WorkspaceExportInput {
   docs: Doc[];
   databases: InlineDatabase[];
   finance?: WorkspaceFinanceExport;
+  todos?: WorkspaceTodosExport;
   agent?: WorkspaceAgentExport;
   theme?: ThemePreference;
 }
@@ -58,6 +81,7 @@ export interface WorkspaceExportBundle {
   docs: Doc[];
   databases: InlineDatabase[];
   finance?: WorkspaceFinanceExport;
+  todos?: WorkspaceTodosExport;
   agent?: WorkspaceAgentExport;
   theme?: ThemePreference;
 }
@@ -71,8 +95,12 @@ export interface ParsedImportResult {
   financeTrashedAccountCount: number;
   financeTransactionCount: number;
   financeRecurringCount: number;
+  todoProjectCount: number;
+  todoTrashedProjectCount: number;
+  todoTaskCount: number;
   agentSessionCount: number;
   hasFinance: boolean;
+  hasTodos: boolean;
   hasAgent: boolean;
   hasTheme: boolean;
   skippedDocCount: number;
@@ -115,6 +143,7 @@ export function buildWorkspaceExportBundle(
     docs: input.docs,
     databases: input.databases,
     ...(input.finance ? { finance: input.finance } : {}),
+    ...(input.todos ? { todos: input.todos } : {}),
     ...(input.agent ? { agent: input.agent } : {}),
     ...(input.theme ? { theme: input.theme } : {}),
   };
@@ -297,6 +326,208 @@ export function prepareFinanceImport(
   };
 }
 
+function repairTaskLinks(
+  tasks: TodoTask[],
+  validProjectIds: ReadonlySet<string>,
+  sectionById: ReadonlyMap<string, TodoSection>
+): TodoTask[] {
+  const cleaned = tasks
+    .filter((t) => t.projectId === null || validProjectIds.has(t.projectId))
+    .map((t) => {
+      const next: TodoTask = { ...t };
+      if (next.sectionId) {
+        const sec = sectionById.get(next.sectionId);
+        if (!sec || sec.projectId !== next.projectId) {
+          delete next.sectionId;
+        }
+      }
+      return next;
+    });
+
+  const byId = new Map(cleaned.map((t) => [t.id, t]));
+  for (const task of cleaned) {
+    if (!task.parentId) continue;
+    if (!byId.has(task.parentId) || task.parentId === task.id) {
+      delete task.parentId;
+      continue;
+    }
+    const seen = new Set<string>([task.id]);
+    let curr = byId.get(task.parentId);
+    while (curr) {
+      if (seen.has(curr.id)) {
+        delete task.parentId;
+        break;
+      }
+      seen.add(curr.id);
+      curr = curr.parentId ? byId.get(curr.parentId) : undefined;
+    }
+  }
+  return cleaned;
+}
+
+/** Computes the next Todos state for either "merge" (fresh IDs) or "replace". */
+export function prepareTodosImport(
+  current: WorkspaceTodosExport,
+  incoming: WorkspaceTodosExport,
+  mode: ImportMode
+): WorkspaceTodosExport {
+  if (mode === "replace") {
+    const repairedProjects = repairProjectHierarchy(incoming.projects);
+    const validProjectIds = new Set(repairedProjects.map((p) => p.id));
+    const validSections = incoming.sections.filter((s) =>
+      validProjectIds.has(s.projectId)
+    );
+    const sectionById = new Map(validSections.map((s) => [s.id, s]));
+    const tasks = repairTaskLinks(incoming.tasks, validProjectIds, sectionById);
+
+    const labelMap = new Map<string, TodoLabel>();
+    for (const lbl of incoming.labels) {
+      const key = normalizeLabelName(lbl.name);
+      if (key && !labelMap.has(key)) {
+        labelMap.set(key, { ...lbl, name: key });
+      }
+    }
+
+    const incomingLogs = incoming.completionLog ?? [];
+    return {
+      projects: repairedProjects,
+      sections: validSections,
+      labels: [...labelMap.values()],
+      tasks,
+      ...(incomingLogs.length > 0
+        ? {
+            completionLog: incomingLogs.filter(
+              (entry) =>
+                entry.projectId === null || validProjectIds.has(entry.projectId)
+            ),
+          }
+        : {}),
+    };
+  }
+
+  const projectIdMap = new Map<string, string>();
+  for (const project of incoming.projects) {
+    projectIdMap.set(project.id, createId());
+  }
+
+  const remappedProjects: TodoProject[] = incoming.projects.map((project) => {
+    const nextId = projectIdMap.get(project.id) ?? createId();
+    const nextParentId = project.parentId
+      ? projectIdMap.get(project.parentId)
+      : undefined;
+    const next: TodoProject = { ...project, id: nextId };
+    if (nextParentId && nextParentId !== nextId) {
+      next.parentId = nextParentId;
+    } else {
+      delete next.parentId;
+    }
+    return next;
+  });
+
+  const sectionIdMap = new Map<string, string>();
+  const remappedSections: TodoSection[] = [];
+  for (const section of incoming.sections) {
+    const nextProjectId = projectIdMap.get(section.projectId);
+    if (!nextProjectId) continue;
+    const nextId = createId();
+    sectionIdMap.set(section.id, nextId);
+    remappedSections.push({
+      ...section,
+      id: nextId,
+      projectId: nextProjectId,
+    });
+  }
+
+  const taskIdMap = new Map<string, string>();
+  for (const task of incoming.tasks) {
+    taskIdMap.set(task.id, createId());
+  }
+
+  const remappedTasks: TodoTask[] = [];
+  for (const task of incoming.tasks) {
+    const nextId = taskIdMap.get(task.id) ?? createId();
+    let nextProjectId: string | null = null;
+    if (task.projectId) {
+      const mapped = projectIdMap.get(task.projectId);
+      if (!mapped) continue;
+      nextProjectId = mapped;
+    }
+    const nextSectionId =
+      nextProjectId && task.sectionId
+        ? sectionIdMap.get(task.sectionId)
+        : undefined;
+    const nextParentId = task.parentId ? taskIdMap.get(task.parentId) : undefined;
+    const nextTask: TodoTask = {
+      ...task,
+      id: nextId,
+      projectId: nextProjectId,
+      ...(task.comments
+        ? {
+            comments: task.comments.map((c) => ({
+              ...c,
+              id: createId(),
+            })),
+          }
+        : {}),
+    };
+    if (nextSectionId) nextTask.sectionId = nextSectionId;
+    else delete nextTask.sectionId;
+    if (nextParentId && nextParentId !== nextId) nextTask.parentId = nextParentId;
+    else delete nextTask.parentId;
+    remappedTasks.push(nextTask);
+  }
+
+  const mergedProjects = repairProjectHierarchy([
+    ...current.projects,
+    ...remappedProjects,
+  ]);
+  const mergedSections = [...current.sections, ...remappedSections];
+  const validProjectIds = new Set(mergedProjects.map((p) => p.id));
+  const sectionById = new Map(mergedSections.map((s) => [s.id, s]));
+
+  const labelByName = new Map<string, TodoLabel>();
+  for (const lbl of current.labels) {
+    const key = normalizeLabelName(lbl.name);
+    if (key) labelByName.set(key, lbl);
+  }
+  for (const lbl of incoming.labels) {
+    const key = normalizeLabelName(lbl.name);
+    if (key && !labelByName.has(key)) {
+      labelByName.set(key, { ...lbl, id: createId(), name: key });
+    }
+  }
+
+  const remappedLogs: TodoCompletionLog[] = [];
+  for (const entry of incoming.completionLog ?? []) {
+    let nextProjectId: string | null = null;
+    if (entry.projectId) {
+      const mapped = projectIdMap.get(entry.projectId);
+      if (!mapped) continue;
+      nextProjectId = mapped;
+    }
+    remappedLogs.push({
+      ...entry,
+      id: createId(),
+      taskId: taskIdMap.get(entry.taskId) ?? createId(),
+      projectId: nextProjectId,
+    });
+  }
+
+  const mergedLogs = [...(current.completionLog ?? []), ...remappedLogs];
+
+  return {
+    projects: mergedProjects,
+    sections: mergedSections,
+    labels: [...labelByName.values()],
+    tasks: repairTaskLinks(
+      [...current.tasks, ...remappedTasks],
+      validProjectIds,
+      sectionById
+    ),
+    ...(mergedLogs.length > 0 ? { completionLog: mergedLogs } : {}),
+  };
+}
+
 /** Parses, validates, and sanitizes an uploaded workspace JSON string before import. */
 export function parseWorkspaceImport(
   rawText: string
@@ -341,6 +572,7 @@ export function parseWorkspaceImport(
 
   const hasAnyExtraDomain =
     obj.finance !== undefined ||
+    obj.todos !== undefined ||
     obj.agent !== undefined ||
     obj.theme !== undefined;
 
@@ -523,6 +755,137 @@ export function parseWorkspaceImport(
     };
   }
 
+  // Optional Todos domain (v3+)
+  let todos: WorkspaceTodosExport | undefined;
+  if (obj.todos !== undefined) {
+    if (
+      !obj.todos ||
+      typeof obj.todos !== "object" ||
+      Array.isArray(obj.todos)
+    ) {
+      return {
+        ok: false,
+        error: 'Invalid export file: "todos" must be an object.',
+      };
+    }
+    const todosObj = obj.todos as Record<string, unknown>;
+    for (const key of [
+      "projects",
+      "sections",
+      "labels",
+      "tasks",
+      "completionLog",
+    ] as const) {
+      if (todosObj[key] !== undefined && !Array.isArray(todosObj[key])) {
+        return {
+          ok: false,
+          error: `Invalid export file: "todos.${key}" must be an array.`,
+        };
+      }
+    }
+
+    const rawProjects = Array.isArray(todosObj.projects)
+      ? todosObj.projects
+      : [];
+    const projectsList: TodoProject[] = [];
+    const seenProjectIds = new Set<string>();
+    let skippedProjects = 0;
+    for (const rawProj of rawProjects) {
+      const norm = normalizeProject(rawProj);
+      if (!norm || seenProjectIds.has(norm.id)) {
+        skippedProjects += 1;
+        continue;
+      }
+      seenProjectIds.add(norm.id);
+      projectsList.push(norm);
+    }
+    const repairedProjects = repairProjectHierarchy(projectsList);
+    const validProjectIds = new Set(repairedProjects.map((p) => p.id));
+
+    const rawSections = Array.isArray(todosObj.sections)
+      ? todosObj.sections
+      : [];
+    const sectionsList: TodoSection[] = [];
+    const seenSectionIds = new Set<string>();
+    for (const rawSec of rawSections) {
+      const norm = normalizeSection(rawSec);
+      if (
+        !norm ||
+        seenSectionIds.has(norm.id) ||
+        !validProjectIds.has(norm.projectId)
+      ) {
+        continue;
+      }
+      seenSectionIds.add(norm.id);
+      sectionsList.push(norm);
+    }
+    const sectionById = new Map(sectionsList.map((s) => [s.id, s]));
+
+    const rawLabels = Array.isArray(todosObj.labels) ? todosObj.labels : [];
+    const labelsMap = new Map<string, TodoLabel>();
+    for (const rawLbl of rawLabels) {
+      const norm = normalizeLabel(rawLbl);
+      if (norm && !labelsMap.has(norm.name)) {
+        labelsMap.set(norm.name, norm);
+      }
+    }
+
+    const rawTasks = Array.isArray(todosObj.tasks) ? todosObj.tasks : [];
+    const tasksList: TodoTask[] = [];
+    const seenTaskIds = new Set<string>();
+    let skippedTasks = 0;
+    for (const rawTask of rawTasks) {
+      const norm = normalizeTask(rawTask);
+      if (
+        !norm ||
+        seenTaskIds.has(norm.id) ||
+        (norm.projectId !== null && !validProjectIds.has(norm.projectId))
+      ) {
+        skippedTasks += 1;
+        continue;
+      }
+      seenTaskIds.add(norm.id);
+      tasksList.push(norm);
+    }
+
+    const rawLogs = Array.isArray(todosObj.completionLog)
+      ? todosObj.completionLog
+      : [];
+    const logsList: TodoCompletionLog[] = [];
+    const seenLogIds = new Set<string>();
+    for (const rawLog of rawLogs) {
+      const norm = normalizeCompletionLog(rawLog);
+      if (
+        !norm ||
+        seenLogIds.has(norm.id) ||
+        (norm.projectId !== null && !validProjectIds.has(norm.projectId))
+      ) {
+        continue;
+      }
+      seenLogIds.add(norm.id);
+      logsList.push(norm);
+    }
+
+    if (skippedProjects > 0) {
+      warnings.push(
+        `Skipped ${skippedProjects} invalid or duplicate todo ${skippedProjects === 1 ? "project" : "projects"}.`
+      );
+    }
+    if (skippedTasks > 0) {
+      warnings.push(
+        `Skipped ${skippedTasks} invalid, duplicate, or orphan todo ${skippedTasks === 1 ? "task" : "tasks"}.`
+      );
+    }
+
+    todos = {
+      projects: repairedProjects,
+      sections: sectionsList,
+      labels: [...labelsMap.values()],
+      tasks: repairTaskLinks(tasksList, validProjectIds, sectionById),
+      completionLog: logsList,
+    };
+  }
+
   // Optional Agent domain (v2+)
   let agent: WorkspaceAgentExport | undefined;
   if (obj.agent !== undefined) {
@@ -582,6 +945,7 @@ export function parseWorkspaceImport(
     docs.length === 0 &&
     databases.length === 0 &&
     !finance &&
+    !todos &&
     !agent &&
     !theme
   ) {
@@ -594,6 +958,9 @@ export function parseWorkspaceImport(
   const trashedDocCount = docs.filter((doc) => Boolean(doc.trashedAt)).length;
   const financeTrashedAccountCount = finance
     ? finance.accounts.filter((acc) => Boolean(acc.trashedAt)).length
+    : 0;
+  const todoTrashedProjectCount = todos
+    ? todos.projects.filter((p) => Boolean(p.trashedAt)).length
     : 0;
 
   return {
@@ -609,6 +976,7 @@ export function parseWorkspaceImport(
         docs,
         databases,
         ...(finance ? { finance } : {}),
+        ...(todos ? { todos } : {}),
         ...(agent ? { agent } : {}),
         ...(theme ? { theme } : {}),
       },
@@ -619,8 +987,12 @@ export function parseWorkspaceImport(
       financeTrashedAccountCount,
       financeTransactionCount: finance ? finance.transactions.length : 0,
       financeRecurringCount: finance ? finance.recurring.length : 0,
+      todoProjectCount: todos ? todos.projects.length : 0,
+      todoTrashedProjectCount,
+      todoTaskCount: todos ? todos.tasks.length : 0,
       agentSessionCount: agent ? agent.sessions.length : 0,
       hasFinance: Boolean(finance),
+      hasTodos: Boolean(todos),
       hasAgent: Boolean(agent),
       hasTheme: theme !== undefined,
       skippedDocCount,
@@ -658,6 +1030,7 @@ function remapImportedBlocks(
     const nextBlock: DocBlock = {
       ...block,
       id: createId(),
+      ...(block.todoEmbed ? { todoEmbed: { ...block.todoEmbed } } : {}),
     };
 
     if (block.syncGroupId) {

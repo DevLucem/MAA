@@ -2,19 +2,25 @@ import type { CSSProperties } from "react";
 import boardSvg from "./board.svg";
 import botSvg from "./bot.svg";
 import calendarSvg from "./calendar.svg";
+import checkCircleSvg from "./check-circle.svg";
 import chevronRightSvg from "./chevron-right.svg";
 import copySvg from "./copy.svg";
 import databaseSvg from "./database.svg";
 import documentSvg from "./document.svg";
 import downloadSvg from "./download.svg";
+import editSvg from "./edit.svg";
 import ellipsisSvg from "./ellipsis.svg";
 import externalLinkSvg from "./external-link.svg";
 import filterSvg from "./filter.svg";
+import flagSvg from "./flag.svg";
 import gallerySvg from "./gallery.svg";
 import gripSvg from "./grip.svg";
 import fullWidthSvg from "./full-width.svg";
+import hashSvg from "./hash.svg";
 import imageSvg from "./image.svg";
+import inboxSvg from "./inbox.svg";
 import linkSvg from "./link.svg";
+import listSvg from "./list.svg";
 import lockSvg from "./lock.svg";
 import maximizeSvg from "./maximize.svg";
 import menuSvg from "./menu.svg";
@@ -23,6 +29,7 @@ import monitorSvg from "./monitor.svg";
 import moonSvg from "./moon.svg";
 import panelRightSvg from "./panel-right.svg";
 import plusSvg from "./plus.svg";
+import repeatSvg from "./repeat.svg";
 import restoreSvg from "./restore.svg";
 import searchSvg from "./search.svg";
 import sendSvg from "./send.svg";
@@ -33,9 +40,11 @@ import sortSvg from "./sort.svg";
 import starSolidSvg from "./star-solid.svg";
 import starSvg from "./star.svg";
 import stopSvg from "./stop.svg";
+import subtasksSvg from "./subtasks.svg";
 import sunSvg from "./sun.svg";
 import syncSvg from "./sync.svg";
 import tableSvg from "./table.svg";
+import tagSvg from "./tag.svg";
 import timelineSvg from "./timeline.svg";
 import trashSvg from "./trash.svg";
 import unlinkSvg from "./unlink.svg";
@@ -51,19 +60,25 @@ const ICONS = {
   board: assetUrl(boardSvg),
   bot: assetUrl(botSvg),
   calendar: assetUrl(calendarSvg),
+  "check-circle": assetUrl(checkCircleSvg),
   "chevron-right": assetUrl(chevronRightSvg),
   copy: assetUrl(copySvg),
   database: assetUrl(databaseSvg),
   document: assetUrl(documentSvg),
   download: assetUrl(downloadSvg),
+  edit: assetUrl(editSvg),
   ellipsis: assetUrl(ellipsisSvg),
   "external-link": assetUrl(externalLinkSvg),
   filter: assetUrl(filterSvg),
+  flag: assetUrl(flagSvg),
+  "full-width": assetUrl(fullWidthSvg),
   gallery: assetUrl(gallerySvg),
   grip: assetUrl(gripSvg),
-  "full-width": assetUrl(fullWidthSvg),
+  hash: assetUrl(hashSvg),
   image: assetUrl(imageSvg),
+  inbox: assetUrl(inboxSvg),
   link: assetUrl(linkSvg),
+  list: assetUrl(listSvg),
   lock: assetUrl(lockSvg),
   maximize: assetUrl(maximizeSvg),
   menu: assetUrl(menuSvg),
@@ -72,6 +87,7 @@ const ICONS = {
   moon: assetUrl(moonSvg),
   "panel-right": assetUrl(panelRightSvg),
   plus: assetUrl(plusSvg),
+  repeat: assetUrl(repeatSvg),
   restore: assetUrl(restoreSvg),
   search: assetUrl(searchSvg),
   send: assetUrl(sendSvg),
@@ -82,9 +98,11 @@ const ICONS = {
   star: assetUrl(starSvg),
   "star-solid": assetUrl(starSolidSvg),
   stop: assetUrl(stopSvg),
+  subtasks: assetUrl(subtasksSvg),
   sun: assetUrl(sunSvg),
   sync: assetUrl(syncSvg),
   table: assetUrl(tableSvg),
+  tag: assetUrl(tagSvg),
   timeline: assetUrl(timelineSvg),
   trash: assetUrl(trashSvg),
   unlink: assetUrl(unlinkSvg),

@@ -164,6 +164,13 @@ export const SLASH_COMMANDS: SlashCommandOption[] = [
     type: "bookmark",
   },
   {
+    id: "todo-embed",
+    label: "Tasks embed",
+    hint: "Embed a Todo project or section",
+    keywords: "todo todos tasks project section embed link list board",
+    type: "todo-embed",
+  },
+  {
     id: "synced-block",
     label: "Synced block",
     hint: "Sync edits across pages",

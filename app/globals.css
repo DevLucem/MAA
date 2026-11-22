@@ -325,6 +325,169 @@
     -webkit-user-select: none;
     user-select: none;
   }
+
+  .todo-checkbox {
+    --todo-icon-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.25' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'></polyline></svg>");
+    --checkbox-size: 1.15em;
+    --checkbox-icon-size: 0.68em;
+    --todo-priority-color: var(--muted);
+    --todo-priority-bg: transparent;
+
+    appearance: none;
+    display: inline-grid;
+    place-content: center;
+    flex: none;
+    inline-size: var(--checkbox-size);
+    aspect-ratio: 1;
+    margin: 0;
+    border-radius: 9999px;
+    border: 1.5px solid var(--todo-priority-color);
+    background-color: var(--todo-priority-bg);
+    cursor: pointer;
+
+    &[data-priority="1"] {
+      --todo-priority-color: var(--danger);
+      --todo-priority-bg: color-mix(in srgb, var(--danger) 10%, transparent);
+    }
+
+    &[data-priority="2"] {
+      --todo-priority-color: var(--notion-orange);
+      --todo-priority-bg: color-mix(in srgb, var(--notion-orange) 10%, transparent);
+    }
+
+    &[data-priority="3"] {
+      --todo-priority-color: var(--primary);
+      --todo-priority-bg: color-mix(in srgb, var(--primary) 10%, transparent);
+    }
+
+    &[data-priority="4"] {
+      --todo-priority-color: var(--muted);
+      --todo-priority-bg: transparent;
+    }
+
+    &::before {
+      content: "";
+      inline-size: var(--checkbox-icon-size);
+      aspect-ratio: 1;
+      background-color: var(--todo-priority-color);
+      mask: var(--todo-icon-check) no-repeat center / contain;
+      scale: 0;
+      opacity: 0;
+
+      @media (prefers-reduced-motion: no-preference) {
+        transition: scale 150ms ease, opacity 150ms ease;
+      }
+
+      @media (forced-colors: active) {
+        background-color: CanvasText;
+      }
+    }
+
+    &:hover:not(:checked):not(:disabled)::before {
+      scale: 1;
+      opacity: 0.55;
+    }
+
+    &:checked {
+      border-color: var(--todo-priority-color);
+      background-color: var(--todo-priority-color);
+    }
+
+    &:checked::before {
+      background-color: var(--canvas);
+      scale: 1;
+      opacity: 1;
+
+      @media (forced-colors: active) {
+        background-color: HighlightText;
+      }
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      transition: background-color 150ms ease, border-color 150ms ease;
+    }
+
+    @media (forced-colors: active) {
+      border-color: CanvasText;
+      background-color: Canvas;
+
+      &:checked {
+        border-color: Highlight;
+        background-color: Highlight;
+      }
+    }
+  }
+
+  .todo-toast-popover {
+    position: fixed;
+    inset-block-start: auto;
+    inset-inline-end: auto;
+    inset-block-end: 1.25rem;
+    inset-inline-start: 1.25rem;
+    margin: 0;
+    max-inline-size: min(24rem, calc(100vw - 2rem));
+  }
+
+  .todo-toast-popover:is(:popover-open, .\:popover-open) {
+    display: flex;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .todo-toast-popover {
+      opacity: 0;
+      translate: 0 0.5rem;
+      transition: opacity 0.18s ease, translate 0.18s ease, display 0.18s ease, overlay 0.18s ease;
+      transition-behavior: allow-discrete;
+    }
+
+    .todo-toast-popover:is(:popover-open, .\:popover-open) {
+      opacity: 1;
+      translate: 0 0;
+
+      @starting-style {
+        opacity: 0;
+        translate: 0 0.5rem;
+      }
+    }
+  }
+
+  .todo-tabs-list {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: inline proximity;
+    scrollbar-width: none;
+  }
+
+  .todo-tabs-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .todo-tab {
+    position: relative;
+    flex: none;
+    scroll-snap-align: start;
+  }
+
+  .todo-tab[aria-selected="true"] {
+    color: var(--foreground);
+  }
+
+  .todo-tab[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0;
+    border-block-end: 2px solid var(--primary);
+  }
 }
 
 @keyframes agent-ring-pulse {

@@ -15,6 +15,8 @@ import {
 } from "../lib/docs-transfer";
 import { useFinance } from "../lib/finance-store";
 import { collectAccountSubtree } from "../lib/finance-utils";
+import { useTodos } from "../lib/todos-store";
+import { collectProjectSubtree } from "../lib/todos-utils";
 import { AgentSettingsPanel } from "./AgentSettingsPanel";
 import { TrashSettingsPanel } from "./TrashSettingsPanel";
 
@@ -83,8 +85,15 @@ export function SettingsDialog({
     importWorkspace,
   } = useDocs();
   const { trashedAccounts, getExportSnapshot, importFinance } = useFinance();
-  const trashCount = trashedDocs.length + trashedAccounts.length;
+  const {
+    trashedProjects,
+    getExportSnapshot: getTodosExportSnapshot,
+    importTodos,
+  } = useTodos();
+  const trashCount =
+    trashedDocs.length + trashedAccounts.length + trashedProjects.length;
   const financeSnapshot = getExportSnapshot();
+  const todosSnapshot = getTodosExportSnapshot();
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -233,10 +242,12 @@ export function SettingsDialog({
     const allExportDocs = [...docs, ...trashedDocs];
     const allExportDbs = [...databases, ...trashedDatabases];
     const currentFinance = getExportSnapshot();
+    const currentTodos = getTodosExportSnapshot();
     const json = serializeWorkspaceExport({
       docs: allExportDocs,
       databases: allExportDbs,
       finance: currentFinance,
+      todos: currentTodos,
       agent: {
         config: agentConfig,
         sessions: agentSessions,
@@ -257,7 +268,7 @@ export function SettingsDialog({
 
     setImportError(null);
     setFeedback(
-      `Downloaded ${filename} (${allExportDocs.length} ${allExportDocs.length === 1 ? "doc" : "docs"}, ${allExportDbs.length} ${allExportDbs.length === 1 ? "database" : "databases"}, ${currentFinance.accounts.length} finance ${currentFinance.accounts.length === 1 ? "account" : "accounts"}, ${currentFinance.transactions.length} ${currentFinance.transactions.length === 1 ? "transaction" : "transactions"}, ${agentSessions.length} agent ${agentSessions.length === 1 ? "session" : "sessions"}, settings & theme).`
+      `Downloaded ${filename} (${allExportDocs.length} ${allExportDocs.length === 1 ? "doc" : "docs"}, ${allExportDbs.length} ${allExportDbs.length === 1 ? "database" : "databases"}, ${currentFinance.accounts.length} finance ${currentFinance.accounts.length === 1 ? "account" : "accounts"}, ${currentFinance.transactions.length} ${currentFinance.transactions.length === 1 ? "transaction" : "transactions"}, ${currentTodos.projects.length} todo ${currentTodos.projects.length === 1 ? "project" : "projects"}, ${currentTodos.tasks.length} ${currentTodos.tasks.length === 1 ? "task" : "tasks"}, ${agentSessions.length} agent ${agentSessions.length === 1 ? "session" : "sessions"}, settings & theme).`
     );
   };
 
@@ -322,6 +333,14 @@ export function SettingsDialog({
       }
     }
 
+    if (bundle.todos) {
+      const todosResult = importTodos(bundle.todos, importMode);
+      summaryParts.push(
+        `${todosResult.projectsCount} todo ${todosResult.projectsCount === 1 ? "project" : "projects"}`,
+        `${todosResult.tasksCount} ${todosResult.tasksCount === 1 ? "task" : "tasks"}`
+      );
+    }
+
     if (bundle.agent) {
       const agentResult = importAgent(bundle.agent, importMode);
       summaryParts.push(
@@ -376,6 +395,27 @@ export function SettingsDialog({
         );
         if (!hasActiveAccount) {
           router.replace("/finance");
+        }
+      } else if (currentPath.startsWith("/todos/project/") && bundle.todos) {
+        const currentProjectId = decodeURIComponent(
+          currentPath.slice("/todos/project/".length).split("/")[0] ?? ""
+        );
+        const hiddenTodoProjectIds = new Set<string>();
+        for (const proj of bundle.todos.projects) {
+          if (proj.trashedAt) {
+            for (const id of collectProjectSubtree(
+              bundle.todos.projects,
+              proj.id
+            )) {
+              hiddenTodoProjectIds.add(id);
+            }
+          }
+        }
+        const hasActiveProject = bundle.todos.projects.some(
+          (p) => p.id === currentProjectId && !hiddenTodoProjectIds.has(p.id)
+        );
+        if (!hasActiveProject) {
+          router.replace("/todos");
         }
       }
     }
@@ -549,8 +589,9 @@ export function SettingsDialog({
                   <p className="text-xs text-muted">
                     Download a full JSON backup of all documents &amp; databases
                     (including Trash), Finance accounts, transactions &amp;
-                    recurring rules, Agent settings &amp; chat sessions, and
-                    theme preference ({docs.length + trashedDocs.length}{" "}
+                    recurring rules, Todos projects &amp; tasks, Agent settings
+                    &amp; chat sessions, and theme preference (
+                    {docs.length + trashedDocs.length}{" "}
                     {docs.length + trashedDocs.length === 1
                       ? "doc"
                       : "docs"}
@@ -566,6 +607,12 @@ export function SettingsDialog({
                     {financeSnapshot.transactions.length === 1
                       ? "transaction"
                       : "transactions"}
+                    , {todosSnapshot.projects.length} todo{" "}
+                    {todosSnapshot.projects.length === 1
+                      ? "project"
+                      : "projects"}
+                    , {todosSnapshot.tasks.length}{" "}
+                    {todosSnapshot.tasks.length === 1 ? "task" : "tasks"}
                     , {agentSessions.length} agent{" "}
                     {agentSessions.length === 1 ? "session" : "sessions"}).
                   </p>
@@ -677,6 +724,21 @@ export function SettingsDialog({
                                 : "rules"
                             }`
                           : ""}
+                        {stagedImport.hasTodos
+                          ? `, ${stagedImport.todoProjectCount} todo ${
+                              stagedImport.todoProjectCount === 1
+                                ? "project"
+                                : "projects"
+                            }${
+                              stagedImport.todoTrashedProjectCount > 0
+                                ? ` (${stagedImport.todoTrashedProjectCount} in trash)`
+                                : ""
+                            }, ${stagedImport.todoTaskCount} ${
+                              stagedImport.todoTaskCount === 1
+                                ? "task"
+                                : "tasks"
+                            }`
+                          : ""}
                         {stagedImport.hasAgent
                           ? `, ${stagedImport.agentSessionCount} agent ${
                               stagedImport.agentSessionCount === 1
@@ -739,7 +801,7 @@ export function SettingsDialog({
                         </span>
                         <span className="block text-muted">
                           Replaces all current workspace data (documents,
-                          databases, Trash, Finance, Agent config &amp;
+                          databases, Trash, Finance, Todos, Agent config &amp;
                           sessions, and theme) with the contents of this file.
                         </span>
                       </span>
